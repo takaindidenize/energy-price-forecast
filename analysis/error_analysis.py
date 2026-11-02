@@ -3,7 +3,7 @@
 Reads the 2025 backtest predictions (`data/backtest_<market>_2025.parquet`, written by
 `analysis/run_backtests.py`) and the raw prices, then writes:
 
-- `docs/analysis/results.md`: error tables by regime, the price-cap experiment;
+- `docs/analysis/results.md`: error tables by regime, the effect of the price limits;
 - `docs/img/error_by_regime.png`, `docs/img/monthly_mae.png`, `docs/img/example_weeks.png`.
 
 Run from the repository root: `python analysis/error_analysis.py`.
@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from price_forecast import config  # noqa: E402
+from price_forecast import bounds, config  # noqa: E402
 
 DOCS = config.PROJECT_ROOT / "docs"
 IMG = DOCS / "img"
@@ -35,14 +35,14 @@ COLORS = {
     "seasonal_naive": "#9a9993",
     "lear": "#2a78d6",
     "lightgbm": "#eb6834",
-    "lear_capped": "#1baf7a",
+    "lear_bounded": "#1baf7a",
 }
 LABELS = {
     "seasonal_naive": "Seasonal naive",
     "naive": "Naive",
     "lear": "LEAR",
     "lightgbm": "LightGBM",
-    "lear_capped": "LEAR within 0–cap",
+    "lear_bounded": "LEAR, bounded",
 }
 MODELS = ["seasonal_naive", "lear", "lightgbm"]
 
@@ -62,44 +62,17 @@ def load_predictions(market: str) -> pd.DataFrame:
     return p
 
 
-def turkish_caps() -> pd.DataFrame:
-    """Hourly TRY price, the month's price cap and the EUR/TRY rate implied by EPİAŞ's prices.
-
-    The cap is the regulated maximum price. It is read off the data as the month's highest price,
-    which the market sits at for dozens of hours every month; in production it would come from the
-    regulator's published decisions, which are known in advance.
-    """
+def add_turkish_regimes(p: pd.DataFrame) -> pd.DataFrame:
+    """Add the TRY price and flags for hours at the regulated cap and at the zero floor."""
     raw = duckdb.sql(
-        f"SELECT delivery_start, price, price_eur "
+        f"SELECT delivery_start AS delivery_hour, price "
         f"FROM '{config.PRICES_RAW_DIR.as_posix()}/market=tr/*/*/data.parquet'"
     ).df()
-    local = raw["delivery_start"] + pd.Timedelta(hours=3)
-    raw["local_date"] = local.dt.date
-    raw["cap_try"] = raw.groupby(local.dt.to_period("M"))["price"].transform("max")
-    raw["eur_per_try"] = np.where(raw["price"] > 0, raw["price_eur"] / raw["price"], np.nan)
-    raw["eur_per_try_day"] = raw.groupby("local_date")["eur_per_try"].transform("mean")
-    return raw.rename(columns={"delivery_start": "delivery_hour"})
-
-
-def add_turkish_regimes(p: pd.DataFrame) -> pd.DataFrame:
-    caps = turkish_caps()
-    p = p.merge(caps[["delivery_hour", "price", "cap_try"]], on="delivery_hour", how="left")
-    # The rate of the issue day (the day before delivery) is known when the forecast is made.
-    rate = caps.groupby("local_date")["eur_per_try_day"].first()
-    issue_day = p["delivery_date_local"].map(lambda d: d - pd.Timedelta(days=1))
-    p["cap_eur_known"] = p["cap_try"] * issue_day.map(rate)
-    p["at_cap"] = p["price"] >= p["cap_try"]
+    p = p.merge(raw, on="delivery_hour", how="left")
+    cap = p["delivery_date_local"].map(lambda d: bounds.cap_on("tr", d))
+    p["at_cap"] = p["price"] >= cap
     p["zero_price"] = p["price"] == 0
     return p
-
-
-def capped_lear(p: pd.DataFrame) -> pd.DataFrame:
-    """LEAR limited to the Turkish market's bounds: no negative prices, nothing above the cap."""
-    lear = p[p["model"] == "lear"].copy()
-    lear["model"] = "lear_capped"
-    lear["price_eur_pred"] = lear["price_eur_pred"].clip(lower=0).clip(upper=lear["cap_eur_known"])
-    lear["err"] = (lear["price_eur_pred"] - lear["price_eur"]).abs()
-    return lear
 
 
 def regime_table(p: pd.DataFrame, regimes: dict[str, pd.Series], models: list[str]) -> pd.DataFrame:
@@ -225,8 +198,8 @@ def main() -> None:
     OUT_MD.parent.mkdir(parents=True, exist_ok=True)
 
     de = load_predictions("de_lu")
+    de = de[de["model"] != "lear_bounded"]  # identical to LEAR: Germany has no binding limits
     tr = add_turkish_regimes(load_predictions("tr"))
-    tr_all = pd.concat([tr, capped_lear(tr)], ignore_index=True)
 
     workday_de = ~de["is_holiday"] & ~de["is_weekend"]
     de_regimes = {
@@ -235,17 +208,17 @@ def main() -> None:
         "Holidays": de["is_holiday"],
         "Normal workdays": workday_de & (de["price_eur"] >= 0),
     }
-    workday_tr = ~tr_all["is_holiday"] & ~tr_all["is_weekend"]
+    workday_tr = ~tr["is_holiday"] & ~tr["is_weekend"]
     tr_regimes = {
-        "All hours": tr_all["model"].notna(),
-        "At the price cap": tr_all["at_cap"],
-        "Zero prices": tr_all["zero_price"],
-        "Holidays": tr_all["is_holiday"],
-        "Normal workdays": workday_tr & ~tr_all["at_cap"] & ~tr_all["zero_price"],
+        "All hours": tr["model"].notna(),
+        "At the price cap": tr["at_cap"],
+        "Zero prices": tr["zero_price"],
+        "Holidays": tr["is_holiday"],
+        "Normal workdays": workday_tr & ~tr["at_cap"] & ~tr["zero_price"],
     }
-    tr_models = [*MODELS, "lear_capped"]
+    tr_models = [*MODELS, "lear_bounded"]
     de_table = regime_table(de, de_regimes, MODELS)
-    tr_table = regime_table(tr_all, tr_regimes, tr_models)
+    tr_table = regime_table(tr, tr_regimes, tr_models)
 
     chart_regimes(
         {"de_lu": de_table, "tr": tr_table},
@@ -274,20 +247,18 @@ def main() -> None:
     )
 
     lear_rows = tr[tr["model"] == "lear"]
-    over = lear_rows[lear_rows["price_eur_pred"] > lear_rows["cap_eur_known"]]
-    under = lear_rows[lear_rows["price_eur_pred"] < 0]
-    lear_tr = tr[tr["model"] == "lear"]["err"].mean()
-    capped_tr = tr_all[tr_all["model"] == "lear_capped"]["err"].mean()
+    bounded_rows = tr[tr["model"] == "lear_bounded"].set_index("delivery_hour")
+    unbounded = lear_rows.set_index("delivery_hour")["price_eur_pred"]
+    clipped = bounded_rows["price_eur_pred"].reindex(unbounded.index)
+    over = int((unbounded > clipped + 1e-9).sum())
+    under = int((unbounded < 0).sum())
+    lear_tr = lear_rows["err"].mean()
+    bounded_tr = bounded_rows["err"].mean()
     lgbm_tr = tr[tr["model"] == "lightgbm"]["err"].mean()
     floor_tr = (lear_rows["price_eur_pred"].clip(lower=0) - lear_rows["price_eur"]).abs().mean()
-    caps = turkish_caps()
-    cap_history = (
-        caps.assign(month=pd.to_datetime(caps["local_date"]).dt.to_period("M"))
-        .groupby("month")["cap_try"]
-        .first()
+    cap_lines = ", ".join(
+        f"{start}: {int(value):,} TRY" for start, value in config.MARKETS["tr"].limits.caps
     )
-    changes = cap_history[cap_history != cap_history.shift()]
-    cap_lines = ", ".join(f"{m}: {int(v):,} TRY" for m, v in changes.items())
 
     OUT_MD.write_text(
         f"""# Error analysis, 2025 backtest
@@ -302,19 +273,19 @@ Generated by `analysis/error_analysis.py`. MAE in EUR/MWh; bold = best per row.
 
 {md_table(tr_table, tr_models)}
 
-*LEAR within 0–cap* is LEAR with every forecast limited to the Turkish market's own bounds:
-prices cannot be negative, and cannot exceed the regulated maximum. The cap is in TRY; it is
-converted with the issue day's EUR/TRY rate implied by EPİAŞ's own prices, so the experiment uses
-nothing that was unknown at the issue time. Unbounded, LEAR forecast a negative price in
-{len(under):,} hours and a price above the cap in {len(over):,} hours (of 8,760). Keeping it within
-the bounds brings its MAE from {lear_tr:.2f} to {capped_tr:.2f} (LightGBM: {lgbm_tr:.2f}).
+*LEAR, bounded* is the pipeline's default model (`lear_bounded`, `src/price_forecast/bounds.py`):
+LEAR with every forecast kept within the Turkish market's limits. Prices cannot be negative, and
+cannot exceed the regulated cap, which is in TRY and converted with the issue day's EUR/TRY rate
+implied by EPİAŞ's own prices, so nothing unknown at the issue time is used. Unbounded, LEAR
+forecast a negative price in {under:,} hours and a price above the cap in {over:,} hours (of
+8,760). The bounds bring its MAE from {lear_tr:.2f} to {bounded_tr:.2f} (LightGBM: {lgbm_tr:.2f}).
 
 The floor alone, a fixed market rule that involves no estimated value, already brings LEAR to
-{floor_tr:.2f}, below LightGBM. The cap adds the rest; its values below are read off the data
-(the price the market sits at for dozens of hours each month) and in production would come from
-the regulator's decisions, which are published in advance.
+{floor_tr:.2f}, below LightGBM; the cap adds the rest.
 
-Monthly cap values: {cap_lines}.
+Cap schedule (`config.MARKETS["tr"].limits`, first delivery day it applies to): {cap_lines}.
+Some dates are the first day the market cleared at the cap, as the regulator's decision itself was
+not found; see the comments in `config.py`.
 """,
         encoding="utf-8",
     )

@@ -36,10 +36,10 @@ MAE in EUR/MWh; rMAE is the MAE relative to the seasonal naive on the same hours
 ![Forecast error by situation](docs/img/error_by_regime.png)
 
 **Turkey: the linear model ignores the market's bounds.** Turkish prices can be neither negative
-nor above a regulated cap, which the market hit in 1,210 hours of 2025 (14%). On public holidays
+nor above a regulated cap, which the market hit in 1,218 hours of 2025 (14%). On public holidays
 demand collapses and prices sit at zero for hours; LEAR, a linear model on asinh-transformed
 prices, extrapolates far below zero there (89 negative forecasts, down to −145 EUR/MWh during
-Kurban Bayramı) and above the cap in 1,023 hours. LightGBM cannot predict outside the range it was
+Kurban Bayramı) and above the cap in 1,030 hours. LightGBM cannot predict outside the range it was
 trained on, so it is naturally bounded, which is its whole advantage:
 
 | Turkey, 2025 | MAE (EUR/MWh) |
@@ -47,13 +47,15 @@ trained on, so it is naturally bounded, which is its whole advantage:
 | LEAR | 6.61 |
 | LightGBM | 6.34 |
 | LEAR, never below zero (a fixed market rule) | 6.23 |
-| **LEAR within zero and the cap** | **5.94** |
+| **LEAR, bounded: within zero and the cap** (`lear_bounded`, the pipeline's default) | **5.94** |
 
 Keeping LEAR within the market's bounds makes it the best model in every situation: its error on
-zero-price hours falls from 48.0 to 0.8 EUR/MWh. The cap is converted to EUR with the issue day's
-exchange rate, so nothing unknown at forecast time is used. The cap values were read off the data
-(4,200 TRY in January 2023 down to 2,600, then 2,700, 3,000 and 3,400 from April 2025); in
-production they come from the regulator's decisions, published in advance.
+zero-price hours falls from 48.0 to 0.8 EUR/MWh. The bounds live in
+[`bounds.py`](src/price_forecast/bounds.py) and any model can use them (`make_model("<name>_bounded")`).
+The cap is converted to EUR with the issue day's exchange rate, so nothing unknown at forecast
+time is used. The cap schedule is in `config.py`: 4,200 TRY in January 2023, cut to 2,600 by
+April 2023, then 2,700, 3,000 and 3,400 from April 2025. Where the regulator's (EPDK) decision
+could not be found, the date is the first day the market cleared at the new cap.
 
 ![Example weeks](docs/img/example_weeks.png)
 
@@ -81,7 +83,7 @@ pip install -e ".[dev]"
 
 python -m price_forecast.ingestion.energy_charts --start 2023-01 --end 2025-12
 python -m price_forecast.ingestion.weather --market de_lu --start 2023-01 --end 2025-12
-python -m price_forecast.pipeline --market de_lu --date 2025-12-30 --models seasonal_naive,lear
+python -m price_forecast.pipeline --market de_lu --date 2025-12-30 --models seasonal_naive,lear_bounded
 python -m price_forecast.monitor --market de_lu      # joins forecasts with realised prices
 uvicorn price_forecast.api:app                       # http://localhost:8000/docs
 ```

@@ -16,7 +16,7 @@ Ingestion, features and models are imported lazily (see `default_deps`) so this 
 is testable, before or without those areas.
 
     python -m price_forecast.pipeline --market de_lu --date 2026-11-02 \
-        --models seasonal_naive,lightgbm
+        --models seasonal_naive,lear_bounded
 """
 
 from __future__ import annotations
@@ -43,7 +43,9 @@ log = logging.getLogger("price_forecast.pipeline")
 
 DEFAULT_MODELS: tuple[str, ...] = tuple(
     m.strip()
-    for m in os.environ.get("PF_MODELS", "seasonal_naive,lightgbm").split(",")
+    # LEAR within the market's price limits was the best model for both markets in the 2025
+    # backtest (README); the seasonal naive is the baseline monitoring compares against.
+    for m in os.environ.get("PF_MODELS", "seasonal_naive,lear_bounded").split(",")
     if m.strip()
 )
 
@@ -137,10 +139,15 @@ def make_model(name: str) -> Any:
     """Instantiate the forecaster `price_forecast.models.<name>`.
 
     The module must define a class with a no-argument constructor whose `name` attribute equals
-    the module name, e.g. `class SeasonalNaive: name = "seasonal_naive"`.
+    the module name, e.g. `class SeasonalNaive: name = "seasonal_naive"`. A `_bounded` suffix
+    wraps the model so its forecasts stay within the market's price limits.
     """
     if not name.isidentifier() or name == "base":
         raise ValueError(f"invalid model name {name!r}")
+    if name.endswith("_bounded"):
+        from price_forecast.models.bounded import BoundedForecaster
+
+        return BoundedForecaster(make_model(name.removesuffix("_bounded")))
     module = importlib.import_module(f"price_forecast.models.{name}")
     for _, obj in inspect.getmembers(module, inspect.isclass):
         if obj.__module__ == module.__name__ and getattr(obj, "name", None) == name:

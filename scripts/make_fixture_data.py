@@ -169,9 +169,9 @@ def _calendar(market: str, hours: pd.DatetimeIndex) -> tuple[np.ndarray, np.ndar
     hols = holidays.country_holidays(config.MARKETS[market].holiday_country, years=years)
     local_dates = pd.Series(local.date)
     is_holiday = local_dates.map(lambda d: d in hols).to_numpy(dtype=bool)
-    low_demand = (local.dayofweek.to_numpy() >= 5) | is_holiday
+    low_demand = (local.day_of_week.to_numpy() >= 5) | is_holiday
     hour_local = local.hour.to_numpy().astype(float)
-    return hour_local, local.dayofyear.to_numpy().astype(float), low_demand
+    return hour_local, local.day_of_year.to_numpy().astype(float), low_demand
 
 
 def _bump(x: np.ndarray, centre: float, width: float) -> np.ndarray:

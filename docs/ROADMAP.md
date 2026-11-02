@@ -22,8 +22,9 @@
 - [x] Analysis: where each market is hard to forecast (negative prices, price cap hours, holidays,
       the 15-minute switch in October 2025); `analysis/error_analysis.py`.
 - [x] README with findings and charts.
-- [ ] Move the bounds into the product: a price-cap schedule per market in `config.py` (from the
-      regulator's decisions), and bounded forecasts in the pipeline and backtest, with tests.
+- [x] Move the bounds into the product: price limits per market in `config.py`, `bounds.py`,
+      `*_bounded` models; `lear_bounded` is the pipeline's default.
+- [ ] Confirm the remaining cap dates (July 2024, April 2025) against EPDK's decisions.
 
 ## Phase 3: deployment
 - [ ] Scheduled daily run in the cloud, forecast API publicly reachable, accuracy dashboard.

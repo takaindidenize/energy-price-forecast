@@ -11,6 +11,9 @@ import warnings
 from price_forecast import backtest, config, features
 from price_forecast.models import MODEL_NAMES, make_model
 
+# The four models plus LEAR within the market's price limits (the pipeline's default).
+NAMES = (*MODEL_NAMES, "lear_bounded")
+
 
 def main() -> None:
     warnings.filterwarnings("ignore", category=FutureWarning)
@@ -18,7 +21,7 @@ def main() -> None:
         feats = features.build_features(features.load_hourly(market), market)
         preds = backtest.run(
             market,
-            [make_model(name) for name in MODEL_NAMES],
+            [make_model(name) for name in NAMES],
             "2025-01-01",
             "2025-12-31",
             features=feats,

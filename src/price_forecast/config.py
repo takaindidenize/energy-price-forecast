@@ -40,6 +40,19 @@ class WeatherPoint:
 
 
 @dataclass(frozen=True)
+class PriceLimits:
+    """Regulated price bounds of a market, in its own currency per MWh.
+
+    `caps` is a schedule of (first delivery day it applies to, cap), oldest first; a cap applies
+    until the next entry. Regulators publish these decisions in advance, so using them in a
+    forecast does not look ahead.
+    """
+
+    floor: float | None
+    caps: tuple[tuple[str, float], ...] = ()
+
+
+@dataclass(frozen=True)
 class Market:
     """One bidding zone. `code` is the value of the `market` column everywhere."""
 
@@ -53,6 +66,9 @@ class Market:
     # day-ahead auction closes (12:00 CET in Germany, 12:30 in Turkey).
     issue_hour_local: int
     weather_points: tuple[WeatherPoint, ...]
+    # None: no bounds are applied (the European harmonised limits of -500 and +4,000 EUR/MWh
+    # are far outside the prices seen here).
+    limits: PriceLimits | None = None
 
 
 MARKETS: dict[str, Market] = {
@@ -84,6 +100,21 @@ MARKETS: dict[str, Market] = {
             WeatherPoint("ankara", 39.93, 32.86),
             WeatherPoint("izmir", 38.42, 27.14),  # Aegean wind
             WeatherPoint("konya", 37.87, 32.48),  # solar
+        ),
+        # EPDK's day-ahead market limits: the floor has been 0 TRY throughout. Cap dates marked
+        # "first cleared" are the first day the market cleared at that cap, because the decision
+        # itself was not found; check them against EPDK's decisions.
+        limits=PriceLimits(
+            floor=0.0,
+            caps=(
+                ("2023-01-01", 4200.0),  # first cleared
+                ("2023-02-01", 3650.0),  # first cleared
+                ("2023-03-01", 3050.0),  # first cleared
+                ("2023-04-01", 2600.0),  # in force from 1 April 2023 (TSKB energy bulletin)
+                ("2023-07-05", 2700.0),  # EPDK decision reported on 4 July 2023
+                ("2024-07-01", 3000.0),  # first cleared
+                ("2025-04-07", 3400.0),  # first cleared
+            ),
         ),
     ),
 }
