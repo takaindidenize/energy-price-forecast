@@ -1,0 +1,49 @@
+{
+ "latitude": 52.52,
+ "longitude": 13.419998,
+ "generationtime_ms": 1.2,
+ "utc_offset_seconds": 0,
+ "timezone": "GMT",
+ "timezone_abbreviation": "GMT",
+ "elevation": 38.0,
+ "hourly_units": {
+  "time": "unixtime",
+  "temperature_2m": "°C",
+  "wind_speed_80m": "km/h",
+  "wind_speed_120m": "km/h",
+  "shortwave_radiation": "W/m²",
+  "cloud_cover": "%"
+ },
+ "hourly": {
+  "time": [
+   1704067200,
+   1704070800,
+   1704074400
+  ],
+  "temperature_2m": [
+   1.2,
+   0.9,
+   null
+  ],
+  "wind_speed_80m": [
+   20.5,
+   22.0,
+   null
+  ],
+  "wind_speed_120m": [
+   25.1,
+   26.3,
+   null
+  ],
+  "shortwave_radiation": [
+   0.0,
+   0.0,
+   null
+  ],
+  "cloud_cover": [
+   100.0,
+   98.0,
+   null
+  ]
+ }
+}
