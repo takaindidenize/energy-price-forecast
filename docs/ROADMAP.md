@@ -19,9 +19,11 @@
       pipeline, monitor and API run end to end on real data.
 - [x] Turkey: 2023–2025 prices and weather ingested from the live EPİAŞ API (rate limit of 60
       requests per minute found and handled); backtest over 2025 (see README).
-- [ ] Analysis: where each market is hard to forecast (negative prices, price cap hours, holidays,
-      the 15-minute switch in October 2025).
-- [ ] README with findings, charts and design decisions.
+- [x] Analysis: where each market is hard to forecast (negative prices, price cap hours, holidays,
+      the 15-minute switch in October 2025); `analysis/error_analysis.py`.
+- [x] README with findings and charts.
+- [ ] Move the bounds into the product: a price-cap schedule per market in `config.py` (from the
+      regulator's decisions), and bounded forecasts in the pipeline and backtest, with tests.
 
 ## Phase 3: deployment
 - [ ] Scheduled daily run in the cloud, forecast API publicly reachable, accuracy dashboard.

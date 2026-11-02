@@ -27,8 +27,50 @@ MAE in EUR/MWh; rMAE is the MAE relative to the seasonal naive on the same hours
 - **Turkey is calmer but gains less.** The price cap (3,400 TRY/MWh in 2025) and a gas- and
   hydro-driven supply make yesterday's price almost as good as last week's (rMAE 0.98), and the
   models improve on it by about 30%.
-- **The best model differs.** The linear LEAR wins in Germany, as in the forecasting literature
-  (Lago et al., 2021); LightGBM wins in Turkey. Why is the next analysis step.
+- **The best model differs, until the market's rules are applied.** The linear LEAR wins in
+  Germany, as in the forecasting literature (Lago et al., 2021). In Turkey LightGBM wins at
+  first, and the error analysis below shows why.
+
+## Why: where the forecasts go wrong
+
+![Forecast error by situation](docs/img/error_by_regime.png)
+
+**Turkey: the linear model ignores the market's bounds.** Turkish prices can be neither negative
+nor above a regulated cap, which the market hit in 1,210 hours of 2025 (14%). On public holidays
+demand collapses and prices sit at zero for hours; LEAR, a linear model on asinh-transformed
+prices, extrapolates far below zero there (89 negative forecasts, down to −145 EUR/MWh during
+Kurban Bayramı) and above the cap in 1,023 hours. LightGBM cannot predict outside the range it was
+trained on, so it is naturally bounded, which is its whole advantage:
+
+| Turkey, 2025 | MAE (EUR/MWh) |
+|---|---:|
+| LEAR | 6.61 |
+| LightGBM | 6.34 |
+| LEAR, never below zero (a fixed market rule) | 6.23 |
+| **LEAR within zero and the cap** | **5.94** |
+
+Keeping LEAR within the market's bounds makes it the best model in every situation: its error on
+zero-price hours falls from 48.0 to 0.8 EUR/MWh. The cap is converted to EUR with the issue day's
+exchange rate, so nothing unknown at forecast time is used. The cap values were read off the data
+(4,200 TRY in January 2023 down to 2,600, then 2,700, 3,000 and 3,400 from April 2025); in
+production they come from the regulator's decisions, published in advance.
+
+![Example weeks](docs/img/example_weeks.png)
+
+**Germany: negative prices are the hard part.** Prices fell below zero in 576 hours of 2025, on
+sunny, windy days with low demand. LEAR exaggerates these dips (down to −145 EUR/MWh when the
+price was −40), and these hours are the only situation where LightGBM is better (25.4 vs 28.4
+EUR/MWh). On ordinary hours, holidays included, LEAR stays ahead.
+
+![Monthly error](docs/img/monthly_mae.png)
+
+The seasonal naive is worst in winter and in September–October in Germany, when wind makes prices
+swing from week to week; the models stay much flatter. The switch to 15-minute day-ahead products on
+1 October 2025 left no visible mark on the hourly forecasts. Full tables:
+[docs/analysis/results.md](docs/analysis/results.md).
+
+**Takeaway.** Knowing the market's rules beat changing the model: a two-line bound on the linear
+model's output did more than switching to gradient boosting.
 
 ## Run it
 
@@ -46,6 +88,14 @@ uvicorn price_forecast.api:app                       # http://localhost:8000/doc
 
 Turkish prices need an account on the EPİAŞ Transparency Platform; set `EPIAS_USERNAME` and
 `EPIAS_PASSWORD` in the environment, then `python -m price_forecast.ingestion.epias`.
+
+Reproduce the analysis (after ingesting both markets for 2023–2025):
+
+```bash
+pip install -e ".[analysis]"
+python analysis/run_backtests.py      # a few minutes; writes data/backtest_<market>_2025.parquet
+python analysis/error_analysis.py     # writes docs/analysis/results.md and docs/img/*.png
+```
 
 ## Data sources
 
