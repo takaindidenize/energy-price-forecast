@@ -1,0 +1,78 @@
+# Sketch of the scheduled daily run for a later cloud deployment (roadmap phase 3).
+# Disabled: it only runs when started by hand, and it is not wired to persistent storage yet.
+#
+# Before enabling the schedule it needs:
+#   - Secrets EPIAS_USERNAME and EPIAS_PASSWORD (EPİAŞ transparency platform account).
+#   - Persistent storage for data/ (raw parquet + warehouse.duckdb) between runs: e.g. sync it
+#     from and back to an object storage bucket (S3/GCS/R2), with the matching credentials as
+#     secrets. A runner's disk is thrown away after each job, and the upload-artifact step below
+#     only keeps the output for inspection.
+#   - A place for the API to read the warehouse from (the same bucket, or a volume of the
+#     container service running the Docker image).
+#   - Alerting: a failed market makes the pipeline exit non-zero, so the job fails and GitHub
+#     sends the usual failure notification. Degraded models show up in GET /status.
+#
+# Timing: forecasts are issued at 11:00 local time, before the day-ahead auctions close (12:00 CET
+# in Germany, 12:30 TRT in Turkey). 11:00 is 08:00 UTC in Istanbul (no DST) and 09:00/10:00 UTC in
+# Berlin (summer/winter), so one run at 07:30 UTC is in time for both markets all year. Each
+# forecast is stored with the configured issue time, not the moment the job happened to run.
+name: Daily pipeline (sketch)
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Issue day D (YYYY-MM-DD, default today UTC); forecasts are for D+1"
+        required: false
+      markets:
+        description: "Comma-separated markets"
+        required: false
+        default: "de_lu,tr"
+  # schedule:
+  #   - cron: "30 7 * * *"
+
+concurrency:
+  group: daily-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PF_DATA_DIR: ${{ github.workspace }}/data
+      EPIAS_USERNAME: ${{ secrets.EPIAS_USERNAME }}
+      EPIAS_PASSWORD: ${{ secrets.EPIAS_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+
+      # TODO: restore data/ from persistent storage here.
+
+      - name: Forecast D+1
+        env:
+          MARKETS: ${{ inputs.markets || 'de_lu,tr' }}
+          ISSUE_DATE: ${{ inputs.date }}
+        run: |
+          if [ -n "$ISSUE_DATE" ]; then
+            python -m price_forecast.pipeline --market "$MARKETS" --date "$ISSUE_DATE"
+          else
+            python -m price_forecast.pipeline --market "$MARKETS"
+          fi
+
+      - name: Monitor accuracy
+        if: always()
+        run: python -m price_forecast.monitor
+
+      # TODO: save data/ back to persistent storage here.
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: warehouse
+          path: data/warehouse.duckdb
+          if-no-files-found: ignore
+          retention-days: 7

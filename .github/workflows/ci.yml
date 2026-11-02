@@ -17,3 +17,24 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the API image
+        run: docker build -t energy-price-forecast:ci .
+      - name: Smoke test the API (empty warehouse)
+        run: |
+          docker run -d --name api -p 8000:8000 energy-price-forecast:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/health && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS http://127.0.0.1:8000/markets
+          curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/forecast/xx)" = 404
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
