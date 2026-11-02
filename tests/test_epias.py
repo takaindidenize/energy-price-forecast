@@ -223,6 +223,38 @@ def test_gives_up_after_max_attempts(ticket_route, mcp_route):
     assert mcp_route.call_count == epias.MAX_ATTEMPTS
 
 
+def test_rate_limit_waits_as_long_as_the_server_says(ticket_route, mcp_route):
+    """The live API answers 429 with `RateLimit-Reset` (seconds until the 60-second window ends)."""
+    limited = httpx.Response(429, headers={"RateLimit-Limit": "60;w=60", "RateLimit-Reset": "7"})
+    mcp_route.mock(side_effect=[limited, mcp_from_body])
+    sleeps: list[float] = []
+    with epias.EpiasClient(wait=wait_none(), sleep=sleeps.append) as client:
+        assert len(client.fetch_mcp(date(2024, 1, 1), date(2024, 1, 1))) == 24
+    assert sleeps == [8.0]  # the server's 7 s plus a one-second margin
+
+
+def test_retry_after_header_is_preferred_and_capped(ticket_route, mcp_route):
+    limited = httpx.Response(429, headers={"Retry-After": "500", "RateLimit-Reset": "3"})
+    mcp_route.mock(side_effect=[limited, mcp_from_body])
+    sleeps: list[float] = []
+    with epias.EpiasClient(wait=wait_none(), sleep=sleeps.append) as client:
+        client.fetch_mcp(date(2024, 1, 1), date(2024, 1, 1))
+    assert sleeps == [epias.MAX_SERVER_WAIT_SECONDS]
+
+
+def test_pauses_when_the_rate_limit_window_is_used_up(ticket_route, mcp_route):
+    def last_request_in_window(request: httpx.Request) -> httpx.Response:
+        response = mcp_from_body(request)
+        response.headers.update({"RateLimit-Remaining": "0", "RateLimit-Reset": "12"})
+        return response
+
+    mcp_route.mock(side_effect=last_request_in_window)
+    sleeps: list[float] = []
+    with epias.EpiasClient(wait=wait_none(), sleep=sleeps.append) as client:
+        client.fetch_mcp(date(2024, 1, 1), date(2024, 1, 1))
+    assert sleeps == [13.0]
+
+
 def test_client_error_is_not_retried(ticket_route, mcp_route):
     mcp_route.mock(return_value=httpx.Response(400, json={"message": "bad request"}))
     with make_client() as client, pytest.raises(epias.EpiasError, match="HTTP 400"):
@@ -237,20 +269,24 @@ def read_partition(month: str) -> pa.Table:
     return pq.read_table(config.month_partition_path(config.PRICES_RAW_DIR, "tr", month))
 
 
-def test_month_is_split_across_requests(ticket_route, mcp_route):
+def test_chunks_cover_the_range_without_gaps():
+    chunks = list(epias._chunks(date(2024, 2, 1), date(2024, 2, 29), 7))
+    assert chunks[0] == (date(2024, 2, 1), date(2024, 2, 7))
+    assert chunks[-1] == (date(2024, 2, 29), date(2024, 2, 29))
+    assert all(b[0] == a[1] + timedelta(days=1) for a, b in zip(chunks, chunks[1:], strict=False))
+
+
+def test_month_is_one_request(ticket_route, mcp_route):
+    """The live API returns a whole year in one request, so a month needs exactly one."""
     with make_client() as client:
         path = epias.ingest_month("2024-02", client=client)
 
     assert path == config.month_partition_path(config.PRICES_RAW_DIR, "tr", "2024-02")
     bodies = [json.loads(c.request.content) for c in mcp_route.calls]
     assert [(b["startDate"][:10], b["endDate"][:10]) for b in bodies] == [
-        ("2024-02-01", "2024-02-07"),
-        ("2024-02-08", "2024-02-14"),
-        ("2024-02-15", "2024-02-21"),
-        ("2024-02-22", "2024-02-28"),
-        ("2024-02-29", "2024-02-29"),
+        ("2024-02-01", "2024-02-29"),
     ]
-    assert ticket_route.call_count == 1  # one ticket for the whole month
+    assert ticket_route.call_count == 1
     table = read_partition("2024-02")
     assert table.num_rows == 29 * 24
     starts = table.column("delivery_start").to_pylist()

@@ -17,8 +17,8 @@
 ## Phase 2: integration (local)
 - [x] Germany: 2023–2025 prices and weather ingested; backtest over 2025 (see README); daily
       pipeline, monitor and API run end to end on real data.
-- [ ] Turkey: real-data run once an EPİAŞ account exists (`EPIAS_USERNAME` / `EPIAS_PASSWORD`);
-      the client was built from the documentation and tested with mocks only.
+- [x] Turkey: 2023–2025 prices and weather ingested from the live EPİAŞ API (rate limit of 60
+      requests per minute found and handled); backtest over 2025 (see README).
 - [ ] Analysis: where each market is hard to forecast (negative prices, price cap hours, holidays,
       the 15-minute switch in October 2025).
 - [ ] README with findings, charts and design decisions.

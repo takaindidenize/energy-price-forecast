@@ -36,12 +36,18 @@ Market clearing price
     `eptr2/processing/preprocess/params.py::format_date_epias_hour` for the date format,
     `eptr2/assets/skills/eptr2-price-analysis/api-reference.md` for the response fields.)
 
-Not confirmed (no account and no access to the official pages yet)
-    - whether `endDate` is inclusive; it is treated as inclusive here, rows are filtered to the
-      requested dates, and a month with missing hours is logged as a warning;
-    - any per-request date-range limit; none was found, so each month is split into requests
-      of at most `MAX_DAYS_PER_REQUEST` days to stay well under any plausible limit;
-    - whether the MCP response is paginated (eptr2 sends no `page` object for it);
+Verified against the live API (2 November 2026)
+    - login, the `TGT` header and the MCP request and response shapes above all work as described;
+    - `endDate` is inclusive (1–31 March 2024 returns 744 hours);
+    - there is no practical date-range limit: one request returned all 8,784 hours of 2024, without
+      pagination. Each month is therefore fetched with a single request;
+    - the platform allows **60 requests per 60 seconds** and says so in IETF `RateLimit-*` headers
+      (`RateLimit-Limit: 60;w=60`, `RateLimit-Remaining`, `RateLimit-Reset` in seconds). The first
+      version split months into 7-day requests and backed off for at most ~15 s on HTTP 429, which
+      ran out of retries after 13 months; now a 429 waits for the time the server names, and the
+      client pauses by itself when `RateLimit-Remaining` reaches 0.
+
+Still not confirmed
     - the status code for an expired or invalid TGT on data requests (401 is assumed);
     - the status code for wrong credentials at the ticket endpoint (400/401/403 are handled).
 
@@ -90,11 +96,13 @@ MCP_URL = f"{config.EPIAS_BASE_URL}/v1/markets/dam/data/mcp"
 TGT_LIFETIME = timedelta(hours=2)
 # Renew this long before the documented expiry so a ticket never runs out mid-request.
 TGT_RENEW_MARGIN = timedelta(minutes=15)
-# No documented limit was found (see module docstring); a week per request is cheap and safe.
-MAX_DAYS_PER_REQUEST = 7
+# A whole year works in one request (see module docstring), so a month is always one request.
+MAX_DAYS_PER_REQUEST = 31
 
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
-MAX_ATTEMPTS = 5
+MAX_ATTEMPTS = 6
+# Upper bound for a wait the server asks for (Retry-After / RateLimit-Reset); the window is 60 s.
+MAX_SERVER_WAIT_SECONDS = 90.0
 
 SCHEMA = pa.schema(
     [
@@ -128,9 +136,36 @@ class EpiasResponseError(EpiasError):
 
 
 class _RetryableStatus(Exception):
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, retry_after: float | None = None) -> None:
         super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
+        self.retry_after = retry_after
+
+
+def _server_wait(response: httpx.Response) -> float | None:
+    """Seconds the server asks us to wait (`Retry-After`, else `RateLimit-Reset`), if any."""
+    for header in ("Retry-After", "RateLimit-Reset"):
+        value = response.headers.get(header)
+        if value is not None:
+            try:
+                return max(0.0, float(value))
+            except ValueError:
+                continue  # an HTTP date in Retry-After: fall back to our own backoff
+    return None
+
+
+class _ServerOrBackoff(wait_base):
+    """Wait as long as the server said (plus a second), else use the fallback backoff."""
+
+    def __init__(self, fallback: wait_base) -> None:
+        self.fallback = fallback
+
+    def __call__(self, retry_state) -> float:
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        hinted = getattr(exc, "retry_after", None)
+        if hinted is not None:
+            return min(hinted + 1.0, MAX_SERVER_WAIT_SECONDS)
+        return self.fallback(retry_state)
 
 
 def _market_tz() -> ZoneInfo:
@@ -169,6 +204,7 @@ class EpiasClient:
         wait: wait_base | None = None,
         max_attempts: int = MAX_ATTEMPTS,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if username is None or password is None:
             username, password = read_credentials()
@@ -176,9 +212,11 @@ class EpiasClient:
         self._password = password
         self._owns_http = http is None
         self._http = http or httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0))
-        self._wait = wait if wait is not None else wait_exponential(multiplier=1, min=1, max=30)
+        backoff = wait if wait is not None else wait_exponential(multiplier=1, min=1, max=30)
+        self._wait = _ServerOrBackoff(backoff)
         self._max_attempts = max_attempts
         self._clock = clock
+        self._sleep = sleep
         self._tgt: str | None = None
         self._tgt_obtained_at = 0.0
 
@@ -198,11 +236,17 @@ class EpiasClient:
     # -- HTTP with retries -------------------------------------------------------------------
 
     def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
-        """One request, retried with exponential backoff on 429, 5xx and network errors."""
+        """One request, retried on 429, 5xx and network errors.
+
+        A 429 waits as long as the server says; other failures back off exponentially. After a
+        success that used up the rate-limit window, pause until it resets instead of running into
+        a 429 on the next request.
+        """
         retrying = Retrying(
             retry=retry_if_exception_type((_RetryableStatus, httpx.TransportError)),
             stop=stop_after_attempt(self._max_attempts),
             wait=self._wait,
+            sleep=self._sleep,
             reraise=True,
             before_sleep=lambda state: log.warning(
                 "EPİAŞ request to %s failed (%s), attempt %d of %d; retrying",
@@ -217,7 +261,8 @@ class EpiasClient:
                 with attempt:
                     response = self._http.request(method, url, **kwargs)
                     if response.status_code in RETRY_STATUSES:
-                        raise _RetryableStatus(response.status_code)
+                        hinted = _server_wait(response) if response.status_code == 429 else None
+                        raise _RetryableStatus(response.status_code, hinted)
         except _RetryableStatus as exc:
             raise EpiasError(
                 f"EPİAŞ request to {url} still failed after {self._max_attempts} attempts "
@@ -228,6 +273,10 @@ class EpiasClient:
                 f"EPİAŞ request to {url} still failed after {self._max_attempts} attempts "
                 f"(last: {type(exc).__name__})"
             ) from None
+        if response.headers.get("RateLimit-Remaining") == "0":
+            pause = min((_server_wait(response) or 0.0) + 1.0, MAX_SERVER_WAIT_SECONDS)
+            log.info("EPİAŞ rate-limit window used up; pausing %.0f s", pause)
+            self._sleep(pause)
         return response
 
     # -- tickets -----------------------------------------------------------------------------
