@@ -24,7 +24,18 @@
 - [x] README with findings and charts.
 - [x] Move the bounds into the product: price limits per market in `config.py`, `bounds.py`,
       `*_bounded` models; `lear_bounded` is the pipeline's default.
-- [ ] Confirm the remaining cap dates (July 2024, April 2025) against EPDK's decisions.
+- [x] Confirm cap dates: 3,400 TRY from 5 April 2025 (EPDK decision 13423) and 4,500 TRY from
+      4 April 2026 (decision 14459). Still unconfirmed: 3,000 TRY from July 2024 (first cleared).
 
-## Phase 3: deployment
-- [ ] Scheduled daily run in the cloud, forecast API publicly reachable, accuracy dashboard.
+## Phase 3: deployment (in progress)
+Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud account.
+- [ ] Bring data up to today: DE-LU prices and both markets' weather for 2026 (Turkish prices for
+      2026 are already ingested). Check whether Open-Meteo's historical forecast API returns
+      tomorrow's weather; if not, fetch D+1 from the regular forecast API.
+- [ ] `src/price_forecast/report.py`: static `site/index.html` per market with tomorrow's
+      forecast (lear_bounded), the last 14 days of forecast vs actual, and 30-day MAE vs the
+      seasonal naive. Inline SVG, no JS dependencies, light and dark.
+- [ ] `.github/workflows/daily-pipeline.yml`: restore `data/` with actions/cache (full ingest when
+      missing), run pipeline + monitor + report, deploy `site/` to GitHub Pages, save the cache.
+      Needs from the owner: repo secrets `EPIAS_USERNAME` / `EPIAS_PASSWORD`, Pages enabled
+      (public repo, or a paid plan for a private one), then uncomment the schedule.
