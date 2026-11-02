@@ -216,7 +216,7 @@ def build_features(hourly: pd.DataFrame, market: str) -> pd.DataFrame:
             "delivery_hour": df["delivery_hour"],
             "delivery_date_local": dates,
             "hour_local": hour.astype("int64"),
-            "day_of_week": (local.dt.dayofweek + 1).astype("int64"),
+            "day_of_week": (local.dt.day_of_week + 1).astype("int64"),
             "is_holiday": dates.map(lambda d: d in hols).astype(bool),
             TARGET_COLUMN: df[TARGET_COLUMN].astype(float),
             # Issue day = delivery day - 1: its prices were published the day before it.

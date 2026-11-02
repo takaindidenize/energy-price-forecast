@@ -1,22 +1,26 @@
 # Roadmap
 
-## Phase 1: build (parallel sessions)
-- [ ] **European prices + weather**: Energy-Charts day-ahead prices for DE-LU (hourly until
+## Phase 1: build (parallel sessions) ✅
+- [x] **European prices + weather**: Energy-Charts day-ahead prices for DE-LU (hourly until
       2025-09-30, 15-minute after), Open-Meteo historical weather forecasts for every market's
       weather points. Retries, idempotent month partitions, mocked tests.
-- [ ] **Turkish prices**: EPİAŞ Transparency Platform market clearing price (PTF) in TRY and EUR,
+- [x] **Turkish prices**: EPİAŞ Transparency Platform market clearing price (PTF) in TRY and EUR,
       CAS ticket (TGT) authentication from environment variables, ticket renewal, mocked tests.
-- [ ] **Features, models, backtesting**: hourly modelling table without look-ahead; seasonal naive
+- [x] **Features, models, backtesting**: hourly modelling table without look-ahead; seasonal naive
       (same hour last week), naive (same hour yesterday), LEAR-style Lasso and LightGBM; rolling-origin
       daily backtest with MAE, RMSE and rMAE; fixture data generator for CI.
-- [ ] **Pipeline, serving, monitoring, CI**: daily pipeline (ingest → features → fit → forecast →
+- [x] **Pipeline, serving, monitoring, CI**: daily pipeline (ingest → features → fit → forecast →
       store), DuckDB forecast store, FastAPI endpoints for forecasts and accuracy, monitoring that
       flags when a model has been worse than the seasonal naive for several days, Dockerfile,
       GitHub Actions.
 
 ## Phase 2: integration (local)
-- [ ] Real-data run for both markets, backtest over the last 12 months.
-- [ ] Analysis: where each market is hard to forecast (negative prices, price cap hours, holidays).
+- [x] Germany: 2023–2025 prices and weather ingested; backtest over 2025 (see README); daily
+      pipeline, monitor and API run end to end on real data.
+- [ ] Turkey: real-data run once an EPİAŞ account exists (`EPIAS_USERNAME` / `EPIAS_PASSWORD`);
+      the client was built from the documentation and tested with mocks only.
+- [ ] Analysis: where each market is hard to forecast (negative prices, price cap hours, holidays,
+      the 15-minute switch in October 2025).
 - [ ] README with findings, charts and design decisions.
 
 ## Phase 3: deployment
