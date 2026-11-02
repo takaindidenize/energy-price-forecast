@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+data
+tests
+docs
+**/__pycache__
+**/*.egg-info
+.pytest_cache
+.ruff_cache
+*.duckdb
+*.duckdb.wal
+.env
