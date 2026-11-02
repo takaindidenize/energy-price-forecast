@@ -113,7 +113,8 @@ MARKETS: dict[str, Market] = {
                 ("2023-04-01", 2600.0),  # in force from 1 April 2023 (TSKB energy bulletin)
                 ("2023-07-05", 2700.0),  # EPDK decision reported on 4 July 2023
                 ("2024-07-01", 3000.0),  # first cleared
-                ("2025-04-07", 3400.0),  # first cleared
+                ("2025-04-05", 3400.0),  # EPDK decision 13423, Official Gazette of 5 April 2025
+                ("2026-04-04", 4500.0),  # EPDK decision 14459 of 2 April 2026, from 4 April
             ),
         ),
     ),

@@ -221,6 +221,7 @@ def run_market(
         models = sorted(set(forecasts["model"]))
         status = model_status(all_accuracy, market, models, settings, as_of)
         store.upsert(con, "model_status", status)
+    _warn_if_limits_outdated(market)
     for row in status.itertuples(index=False):
         level = logging.WARNING if row.degraded else logging.INFO
         log.log(
@@ -234,6 +235,25 @@ def run_market(
             "n/a" if pd.isna(row.window_rmae) else f"{row.window_rmae:.3f}",
         )
     return status
+
+
+def _warn_if_limits_outdated(market: str) -> None:
+    """Warn when realised prices break the configured price limits (a stale cap schedule)."""
+    from price_forecast import bounds
+
+    try:
+        days = bounds.outdated_limit_days(market)
+    except Exception:  # no raw data yet, or unreadable: monitoring itself must not fail
+        log.debug("%s: could not check price limits", market, exc_info=True)
+        return
+    if days:
+        log.warning(
+            "%s: realised prices broke the configured price limits on %d day(s), latest %s; "
+            "update `limits` in config.py",
+            market,
+            len(days),
+            days[-1],
+        )
 
 
 def run(markets: Sequence[str], settings: MonitorSettings | None = None, **kwargs) -> bool:

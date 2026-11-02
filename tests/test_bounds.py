@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import date
 
 import numpy as np
@@ -13,9 +14,10 @@ from price_forecast.models import make_model
 def test_cap_schedule_follows_effective_dates():
     assert bounds.cap_on("tr", date(2023, 3, 31)) == 3050.0
     assert bounds.cap_on("tr", date(2023, 4, 1)) == 2600.0
-    assert bounds.cap_on("tr", date(2025, 4, 6)) == 3000.0
-    assert bounds.cap_on("tr", date(2025, 4, 7)) == 3400.0
-    assert bounds.cap_on("tr", date(2030, 1, 1)) == 3400.0  # the last cap stays in force
+    assert bounds.cap_on("tr", date(2025, 4, 4)) == 3000.0
+    assert bounds.cap_on("tr", date(2025, 4, 5)) == 3400.0
+    assert bounds.cap_on("tr", date(2026, 4, 4)) == 4500.0
+    assert bounds.cap_on("tr", date(2030, 1, 1)) == 4500.0  # the last cap stays in force
     assert bounds.cap_on("tr", date(2022, 12, 31)) is None
     assert bounds.cap_on("de_lu", date(2025, 6, 1)) is None
 
@@ -106,3 +108,17 @@ def test_make_model_builds_bounded_variants():
     assert model.inner.name == "lear"
     with pytest.raises(ValueError):
         make_model("prophet_bounded")
+
+
+def test_outdated_limits_are_detected(tmp_path, monkeypatch):
+    """A realised price above the configured cap means the regulator changed it."""
+    monkeypatch.setattr(config, "PRICES_RAW_DIR", tmp_path)
+    path = config.month_partition_path(tmp_path, "tr", "2026-04")
+    path.parent.mkdir(parents=True)
+    starts = pd.to_datetime(["2026-04-02 12:00", "2026-04-04 12:00"])
+    pq.write_table(pa.table({"delivery_start": starts, "price": [3400.0, 4500.0]}), path)
+    assert bounds.outdated_limit_days("tr") == []
+    old = config.PriceLimits(floor=0.0, caps=(("2025-04-05", 3400.0),))
+    monkeypatch.setitem(config.MARKETS, "tr", dataclasses.replace(config.MARKETS["tr"], limits=old))
+    assert bounds.outdated_limit_days("tr") == [date(2026, 4, 4)]
+    assert bounds.outdated_limit_days("de_lu") == []
