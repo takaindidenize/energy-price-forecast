@@ -264,3 +264,17 @@ def test_cli_iterates_months(monkeypatch):
 
     assert weather.main(["--market", "tr", "--start", "2024-12", "--end", "2025-01"]) == 0
     assert calls == [("tr", "2024-12"), ("tr", "2025-01")]
+
+
+def test_current_month_is_cut_at_the_forecast_horizon(monkeypatch):
+    """The API rejects end dates over ~15 days ahead: a whole current month cannot be asked."""
+    from datetime import datetime
+
+    from price_forecast.ingestion import weather
+
+    monkeypatch.setattr(weather, "utc_now_naive", lambda: datetime(2026, 11, 3, 11, 30))
+    start, end = weather._fetch_window("2026-11")
+    assert (start, end) == (pd.Timestamp("2026-11-01"), pd.Timestamp("2026-11-11"))
+    assert weather._fetch_window("2026-10")[1] == pd.Timestamp("2026-11-01")  # past: whole month
+    start, end = weather._fetch_window("2027-01")
+    assert end <= start  # entirely beyond the horizon: nothing to fetch

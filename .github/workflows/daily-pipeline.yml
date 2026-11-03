@@ -1,22 +1,22 @@
-# Sketch of the scheduled daily run for a later cloud deployment (roadmap phase 3).
-# Disabled: it only runs when started by hand, and it is not wired to persistent storage yet.
+# Daily forecast: ingest the latest data, forecast tomorrow for both markets, check accuracy,
+# and publish the dashboard (src/price_forecast/report.py) to GitHub Pages.
 #
-# Before enabling the schedule it needs:
-#   - Secrets EPIAS_USERNAME and EPIAS_PASSWORD (EPİAŞ transparency platform account).
-#   - Persistent storage for data/ (raw parquet + warehouse.duckdb) between runs: e.g. sync it
-#     from and back to an object storage bucket (S3/GCS/R2), with the matching credentials as
-#     secrets. A runner's disk is thrown away after each job, and the upload-artifact step below
-#     only keeps the output for inspection.
-#   - A place for the API to read the warehouse from (the same bucket, or a volume of the
-#     container service running the Docker image).
-#   - Alerting: a failed market makes the pipeline exit non-zero, so the job fails and GitHub
-#     sends the usual failure notification. Degraded models show up in GET /status.
+# Storage: data/ (raw Parquet + warehouse.duckdb) is carried from run to run in the Actions cache.
+# When the cache is empty (first run, or evicted after 7 days without a run) the job ingests the
+# full history again, about 15 minutes, and the forecast history on the dashboard starts over;
+# run it once by hand with `backfill_days` to refill it.
+#
+# To switch it on, the repository owner has to:
+#   1. Add the repository secrets EPIAS_USERNAME and EPIAS_PASSWORD (Settings → Secrets and
+#      variables → Actions). Without them the Turkish market fails and Germany still runs.
+#   2. Enable Pages with "GitHub Actions" as the source (Settings → Pages). Pages needs a public
+#      repository on the free plan.
+#   3. Uncomment the schedule below.
 #
 # Timing: forecasts are issued at 11:00 local time, before the day-ahead auctions close (12:00 CET
-# in Germany, 12:30 TRT in Turkey). 11:00 is 08:00 UTC in Istanbul (no DST) and 09:00/10:00 UTC in
-# Berlin (summer/winter), so one run at 07:30 UTC is in time for both markets all year. Each
-# forecast is stored with the configured issue time, not the moment the job happened to run.
-name: Daily pipeline (sketch)
+# in Germany, 12:30 TRT in Turkey). 07:30 UTC is before 11:00 in both markets all year; each
+# forecast is stored with the configured issue time, not the moment the job ran.
+name: Daily forecast
 
 on:
   workflow_dispatch:
@@ -24,21 +24,21 @@ on:
       date:
         description: "Issue day D (YYYY-MM-DD, default today UTC); forecasts are for D+1"
         required: false
-      markets:
-        description: "Comma-separated markets"
+      backfill_days:
+        description: "Run for this many issue days ending at D (refills the dashboard history)"
         required: false
-        default: "de_lu,tr"
+        default: "1"
   # schedule:
   #   - cron: "30 7 * * *"
 
 concurrency:
-  group: daily-pipeline
+  group: daily-forecast
   cancel-in-progress: false
 
 jobs:
-  run:
+  forecast:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       PF_DATA_DIR: ${{ github.workspace }}/data
       EPIAS_USERNAME: ${{ secrets.EPIAS_USERNAME }}
@@ -50,29 +50,72 @@ jobs:
           python-version: "3.12"
       - run: pip install .
 
-      # TODO: restore data/ from persistent storage here.
+      - name: Restore data from the previous run
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: data-${{ github.run_id }}
+          restore-keys: data-
 
-      - name: Forecast D+1
+      - name: Ingest the full history if there is none
+        run: |
+          echo "PF_END_MONTH=$(date -u +%Y-%m)" >> "$GITHUB_ENV"
+          export PF_END_MONTH="$(date -u +%Y-%m)"
+          if [ -d data/raw/prices ]; then
+            echo "Data restored from the cache; the pipeline fetches the recent months itself."
+            exit 0
+          fi
+          python -m price_forecast.ingestion.energy_charts
+          python -m price_forecast.ingestion.weather --market de_lu
+          python -m price_forecast.ingestion.weather --market tr
+          python -m price_forecast.ingestion.epias || echo "::warning::EPİAŞ ingestion failed (secrets missing?)"
+
+      - name: Forecast tomorrow
+        id: pipeline
+        continue-on-error: true  # one failed market must not stop the dashboard update
         env:
-          MARKETS: ${{ inputs.markets || 'de_lu,tr' }}
           ISSUE_DATE: ${{ inputs.date }}
+          DAYS: ${{ inputs.backfill_days || '1' }}
         run: |
           if [ -n "$ISSUE_DATE" ]; then
-            python -m price_forecast.pipeline --market "$MARKETS" --date "$ISSUE_DATE"
+            python -m price_forecast.pipeline --date "$ISSUE_DATE" --days "$DAYS"
           else
-            python -m price_forecast.pipeline --market "$MARKETS"
+            python -m price_forecast.pipeline --days "$DAYS"
           fi
 
-      - name: Monitor accuracy
-        if: always()
+      - name: Check accuracy
         run: python -m price_forecast.monitor
 
-      # TODO: save data/ back to persistent storage here.
+      - name: Build the dashboard
+        run: python -m price_forecast.report --out site
 
-      - uses: actions/upload-artifact@v4
+      - name: Save data for the next run
         if: always()
+        uses: actions/cache/save@v4
         with:
-          name: warehouse
-          path: data/warehouse.duckdb
-          if-no-files-found: ignore
-          retention-days: 7
+          path: data
+          key: data-${{ github.run_id }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Fail the run if a market failed
+        if: steps.pipeline.outcome == 'failure'
+        run: |
+          echo "::error::The pipeline failed for at least one market; see the 'Forecast tomorrow' step."
+          exit 1
+
+  deploy:
+    needs: forecast
+    if: ${{ !cancelled() && needs.forecast.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

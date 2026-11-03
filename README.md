@@ -3,7 +3,7 @@
 Day-ahead electricity price forecasting for Germany-Luxembourg and Turkey: the same pipeline and
 models applied to two very different markets.
 
-Work in progress; see [docs/ROADMAP.md](docs/ROADMAP.md).
+Status and next steps: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## First results: 2025, both markets
 
@@ -74,6 +74,33 @@ swing from week to week; the models stay much flatter. The switch to 15-minute d
 **Takeaway.** Knowing the market's rules beat changing the model: a two-line bound on the linear
 model's output did more than switching to gradient boosting.
 
+## Live forecasts
+
+![Dashboard](docs/img/dashboard.png)
+
+Every morning a GitHub Actions job ([`daily-pipeline.yml`](.github/workflows/daily-pipeline.yml))
+ingests the newest prices and weather forecasts, forecasts the next delivery day for both markets
+with `lear_bounded`, scores the forecasts whose prices have since been published, and publishes a
+static dashboard ([`report.py`](src/price_forecast/report.py)) to GitHub Pages. No server and no
+paid cloud: data is carried between runs in the Actions cache, and an empty cache triggers a full
+re-ingest.
+
+The first live forecasts, issued on 3 November 2026 for 4 November: Turkey's average forecast was
+59.2 EUR/MWh against a realised 59.3, with an hourly MAE of 4.0 (seasonal naive 5.1). Over the
+preceding two weeks the bounded model's MAE was 50.3 EUR/MWh in Germany (seasonal naive 118.2)
+and 6.1 in Turkey (naive 10.8). German prices jumped to about 250 EUR/MWh from 28 October and the
+model has been forecasting about 50 below since: the dashboard shows it, and it is the next thing
+to investigate.
+
+Two lessons from going live:
+
+- **Regulated limits change.** EPDK raised the Turkish cap from 3,400 to 4,500 TRY on 4 April
+  2026, so a forecaster built on 2025 data clipped every higher price. The monitor now warns when
+  realised prices break the configured limits.
+- **Tomorrow's weather has to be asked for differently.** Open-Meteo's historical forecast API
+  serves the latest forecast for the coming days too, but rejects end dates more than about 15
+  days ahead, so the current month is fetched only up to a week ahead.
+
 ## Run it
 
 ```bash
@@ -85,8 +112,12 @@ python -m price_forecast.ingestion.energy_charts --start 2023-01 --end 2025-12
 python -m price_forecast.ingestion.weather --market de_lu --start 2023-01 --end 2025-12
 python -m price_forecast.pipeline --market de_lu --date 2025-12-30 --models seasonal_naive,lear_bounded
 python -m price_forecast.monitor --market de_lu      # joins forecasts with realised prices
+python -m price_forecast.report --out site           # site/index.html, the dashboard
 uvicorn price_forecast.api:app                       # http://localhost:8000/docs
 ```
+
+`python -m price_forecast.pipeline --days 14` backfills the last two weeks of forecasts, so a new
+dashboard has history to show.
 
 Turkish prices need an account on the EPİAŞ Transparency Platform; set `EPIAS_USERNAME` and
 `EPIAS_PASSWORD` in the environment, then `python -m price_forecast.ingestion.epias`.

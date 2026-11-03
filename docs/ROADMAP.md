@@ -27,15 +27,17 @@
 - [x] Confirm cap dates: 3,400 TRY from 5 April 2025 (EPDK decision 13423) and 4,500 TRY from
       4 April 2026 (decision 14459). Still unconfirmed: 3,000 TRY from July 2024 (first cleared).
 
-## Phase 3: deployment (in progress)
+## Phase 3: deployment
 Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud account.
-- [ ] Bring data up to today: DE-LU prices and both markets' weather for 2026 (Turkish prices for
-      2026 are already ingested). Check whether Open-Meteo's historical forecast API returns
-      tomorrow's weather; if not, fetch D+1 from the regular forecast API.
-- [ ] `src/price_forecast/report.py`: static `site/index.html` per market with tomorrow's
+- [x] Data up to today for both markets; the weather ingestion cuts the current month at a
+      7-day horizon (the API rejects end dates more than ~15 days ahead) and so gets tomorrow.
+- [x] `src/price_forecast/report.py`: static `site/index.html` per market with tomorrow's
       forecast (lear_bounded), the last 14 days of forecast vs actual, and 30-day MAE vs the
       seasonal naive. Inline SVG, no JS dependencies, light and dark.
-- [ ] `.github/workflows/daily-pipeline.yml`: restore `data/` with actions/cache (full ingest when
+- [x] `.github/workflows/daily-pipeline.yml`: restore `data/` with actions/cache (full ingest when
       missing), run pipeline + monitor + report, deploy `site/` to GitHub Pages, save the cache.
       Needs from the owner: repo secrets `EPIAS_USERNAME` / `EPIAS_PASSWORD`, Pages enabled
       (public repo, or a paid plan for a private one), then uncomment the schedule.
+- [ ] Owner steps to go live: the secrets, Pages, the schedule (see the workflow's header).
+- [ ] Investigate the German under-forecast since 28 October 2026 (prices ~250 EUR/MWh, model ~50
+      below): a calibration window instead of an expanding one, or gas prices as a feature.

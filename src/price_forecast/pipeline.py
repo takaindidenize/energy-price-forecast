@@ -389,9 +389,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=list(DEFAULT_MODELS),
         help=f"comma-separated model names (default: {','.join(DEFAULT_MODELS)})",
     )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=1,
+        help="run for the N issue days ending at --date, oldest first (backfill; default 1)",
+    )
     parser.add_argument("--no-ingest", action="store_true", help="use the raw data already on disk")
     parser.add_argument("--warehouse", type=Path, default=None, help="DuckDB path override")
     args = parser.parse_args(argv)
+    if args.days < 1:
+        parser.error("--days must be at least 1")
 
     markets = [
         m for value in (args.market or [",".join(config.MARKETS)]) for m in _parse_list(value)
@@ -404,9 +412,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    results = run(
-        markets, issue_date, args.models, warehouse=args.warehouse, ingest=not args.no_ingest
-    )
+    results = []
+    for offset in range(args.days - 1, -1, -1):
+        day = issue_date - timedelta(days=offset)
+        # Ingest once, on the first run: the later days only read what is already on disk.
+        ingest = not args.no_ingest and offset == args.days - 1
+        results += run(markets, day, args.models, warehouse=args.warehouse, ingest=ingest)
     print(summary(results))
     return 0 if all(r.status == "ok" for r in results) else 1
 

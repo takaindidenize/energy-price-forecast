@@ -1,0 +1,85 @@
+from datetime import UTC, datetime
+
+import pandas as pd
+
+from price_forecast import report, store
+
+
+def _hours(start: str, n: int) -> pd.DatetimeIndex:
+    return pd.date_range(start, periods=n, freq="h")
+
+
+def _fill(warehouse) -> None:
+    hours = _hours("2026-11-01 23:00", 72)  # 2–4 November, Berlin time
+    rows = []
+    for i, h in enumerate(hours):
+        issued = pd.Timestamp("2026-11-01 10:00") if i < 48 else pd.Timestamp("2026-11-03 10:00")
+        rows.append(("de_lu", "lear_bounded", issued, h, 100.0 + i))
+        # An older forecast for the same hour must be ignored in favour of the latest one.
+        rows.append(("de_lu", "lear_bounded", issued - pd.Timedelta(days=1), h, -999.0))
+        rows.append(("de_lu", "seasonal_naive", issued, h, 50.0))
+    forecasts = pd.DataFrame(
+        rows, columns=["market", "model", "issued_at", "delivery_hour", "price_eur_pred"]
+    )
+    realised = pd.DataFrame(
+        {
+            "market": "de_lu",
+            "delivery_hour": hours[:48],
+            "price_eur": [110.0 + i for i in range(48)],
+            "loaded_at": pd.Timestamp("2026-11-03 12:00"),
+        }
+    )
+    status = pd.DataFrame(
+        [
+            ("de_lu", m, "ok", False, 0, 3, 30, 2, mae, mae / 20, "2026-11-03", "2026-11-03")
+            for m, mae in (("lear_bounded", 10.0), ("seasonal_naive", 20.0))
+        ],
+        columns=[
+            "market",
+            "model",
+            "status",
+            "degraded",
+            "worse_streak_days",
+            "degraded_after_days",
+            "window_days",
+            "window_n_days",
+            "window_mae",
+            "window_rmae",
+            "evaluated_through",
+            "updated_at",
+        ],
+    )
+    status["evaluated_through"] = pd.to_datetime(status["evaluated_through"]).dt.date
+    status["updated_at"] = pd.to_datetime(status["updated_at"])
+    with store.session(warehouse) as con:
+        store.write_forecasts(con, forecasts)
+        store.upsert(con, "realised_prices", realised)
+        store.upsert(con, "model_status", status)
+
+
+def test_report_shows_tomorrow_history_and_accuracy(tmp_path):
+    warehouse = tmp_path / "w.duckdb"
+    _fill(warehouse)
+    path = report.build(tmp_path / "site", warehouse, now=datetime(2026, 11, 3, 12, tzinfo=UTC))
+    page = path.read_text(encoding="utf-8")
+
+    assert "Germany-Luxembourg" in page
+    assert "Turkey" not in page.split("<main>")[1].split("<footer>")[0].split("</p>", 1)[1]
+    assert "delivery day Wednesday 04 November 2026" in page
+    assert "159.5 EUR/MWh" in page  # mean of 148..171, the latest forecasts for 4 November
+    assert "171.0 at 23:00" in page and "148.0 at 00:00" in page
+    assert "10.0 (naive 20.0)" in page
+    assert "-999" not in page
+    assert page.count("<svg") == 1
+    assert "Updated 2026-11-03 12:00 UTC" in page
+
+
+def test_report_without_forecasts(tmp_path):
+    path = report.build(tmp_path / "site", tmp_path / "empty.duckdb")
+    assert "No forecasts yet." in path.read_text(encoding="utf-8")
+
+
+def test_nice_ticks_cover_the_range():
+    ticks = report._nice_ticks(-12.0, 87.0)
+    assert ticks[0] <= -12.0 and ticks[-1] >= 87.0
+    assert len(set(round(b - a, 6) for a, b in zip(ticks, ticks[1:], strict=False))) == 1

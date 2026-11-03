@@ -8,3 +8,4 @@ data/
 *.duckdb.wal
 .env
 tmp*/
+site/

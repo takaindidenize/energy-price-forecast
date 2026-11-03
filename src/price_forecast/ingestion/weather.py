@@ -65,8 +65,23 @@ _SHEAR_ALPHA = 1 / 7
 _W_100 = math.log(100 / 80) / math.log(120 / 80)
 
 
+# How far past today the current month is fetched. The historical forecast API also serves the
+# latest forecast for the coming days (up to about 15 days ahead) and rejects a request whose
+# end date is further out, so a whole current month cannot be requested in one go. A week covers
+# the next delivery day with room to spare.
+FORECAST_HORIZON_DAYS = 7
+
+
 class NoCoverage(Exception):
     """The API rejected the request (HTTP 400), typically a date range outside its coverage."""
+
+
+def _fetch_window(month: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """UTC [start, end) of `month`, cut at the forecast horizon for the current month."""
+    start, end = month_bounds_utc(month)
+    today = pd.Timestamp(utc_now_naive()).normalize()
+    horizon = today + pd.Timedelta(days=FORECAST_HORIZON_DAYS + 1)
+    return pd.Timestamp(start), min(pd.Timestamp(end), horizon)
 
 
 def wind_speed_100m(v80: pd.Series, v120: pd.Series) -> pd.Series:
@@ -133,8 +148,13 @@ def _covered(df: pd.DataFrame) -> pd.Series:
 
 
 def fetch_point_month(client: httpx.Client, point: WeatherPoint, month: str) -> pd.DataFrame:
-    """Hourly values for one point and UTC month: historical forecasts, archive for the gaps."""
-    start, end = month_bounds_utc(month)
+    """Hourly values for one point and UTC month: historical forecasts, archive for the gaps.
+
+    For the current month only the days up to `FORECAST_HORIZON_DAYS` ahead are fetched.
+    """
+    start, end = _fetch_window(month)
+    if end <= start:
+        return pd.DataFrame(columns=["valid_time", *config.WEATHER_VARIABLES])
     first_day, last_day = f"{start:%Y-%m-%d}", f"{end - timedelta(days=1):%Y-%m-%d}"
     hours = pd.date_range(start, end, freq="h", inclusive="left").astype("datetime64[us]")
 
@@ -214,8 +234,8 @@ def _check_quality(df: pd.DataFrame, market: str, month: str, n_hours: int) -> p
 def ingest_month(market: str, month: str) -> Path | None:
     """Fetch one UTC month for every weather point of `market` and write its partition."""
     points = config.MARKETS[market].weather_points
-    start, end = month_bounds_utc(month)
-    n_hours = int((end - start) / timedelta(hours=1))
+    start, end = _fetch_window(month)
+    n_hours = max(0, int((end - start) / timedelta(hours=1)))
 
     frames = []
     with new_client() as client:
