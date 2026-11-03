@@ -108,7 +108,9 @@ jobs:
 
   deploy:
     needs: forecast
-    if: ${{ !cancelled() && needs.forecast.result != 'skipped' }}
+    # Pages on the free plan needs a public repository; while private, the page is still built
+    # and kept as the run's "github-pages" artifact, just not deployed.
+    if: ${{ !cancelled() && needs.forecast.result != 'skipped' && !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
