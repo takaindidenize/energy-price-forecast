@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -100,7 +101,13 @@ def _nice_ticks(lo: float, hi: float, n: int = 5) -> list[float]:
     return [round(t, 6) for t in ticks]
 
 
-def chart_svg(view: dict) -> str:
+def chart_svg(view: dict, interactive: bool = False) -> str:
+    """The chart as an inline SVG.
+
+    `interactive` adds what the page's script needs for the hover/tap readout: the hourly points
+    as JSON in `data-points` and a hidden crosshair. The README image (`latest.svg`) is shown as
+    a plain <img>, where no script runs, so it is drawn without them.
+    """
     f, r = view["forecasts"], view["realised"]
     times = pd.concat([f["local"], r["local"]])
     t0, t1 = times.min(), times.max() + pd.Timedelta(hours=1)
@@ -118,9 +125,21 @@ def chart_svg(view: dict) -> str:
         points = [f"{x(t):.1f},{y(v):.1f}" for t, v in zip(times, vals, strict=True) if pd.notna(v)]
         return "M" + " L".join(points) if points else ""
 
+    data = ""
+    if interactive:
+        points = _hourly_points(f, r)
+        coords = [
+            {"x": round(x(t), 1), "t": f"{t:%a %d %b, %H:%M}", "a": _fmt(a), "f": _fmt(p)}
+            for t, a, p in points
+        ]
+        heights = [{"ya": _y_or_none(y, a), "yf": _y_or_none(y, p)} for _, a, p in points]
+        data = (
+            f' data-points="{html.escape(json.dumps(coords, ensure_ascii=False))}"'
+            f' data-y="{html.escape(json.dumps(heights))}"'
+        )
     parts = [
         f'<svg viewBox="0 0 {_W} {_H}" role="img" aria-label="Forecast and realised price, '
-        f'{html.escape(view["name"])}">'
+        f'{html.escape(view["name"])}"{data}>'
     ]
     next_start = pd.Timestamp(view["next_day"]).tz_localize(view["timezone"])
     parts.append(
@@ -142,13 +161,29 @@ def chart_svg(view: dict) -> str:
         day += pd.Timedelta(days=2)
     parts.append(f'<path class="actual" d="{path(r["local"], r["price_eur"])}"/>')
     parts.append(f'<path class="forecast" d="{path(f["local"], f["price_eur_pred"])}"/>')
-    for t, v in zip(f["local"], f["price_eur_pred"], strict=True):
+    if interactive:
         parts.append(
-            f'<circle class="hit" cx="{x(t):.1f}" cy="{y(v):.1f}" r="4">'
-            f"<title>{t:%d %b %H:%M}: forecast {v:.1f} EUR/MWh</title></circle>"
+            f'<line class="cross" x1="0" x2="0" y1="{_PAD_T}" y2="{_H - _PAD_B}"/>'
+            f'<circle class="dot actual-dot" r="4" cx="-10" cy="-10"/>'
+            f'<circle class="dot forecast-dot" r="4" cx="-10" cy="-10"/>'
         )
     parts.append("</svg>")
     return "".join(parts)
+
+
+def _y_or_none(y, value) -> float | None:
+    return None if pd.isna(value) else round(y(value), 1)
+
+
+def _hourly_points(f: pd.DataFrame, r: pd.DataFrame) -> list[tuple[pd.Timestamp, float, float]]:
+    """(local hour, realised, forecast) for every hour that has either, oldest first."""
+    joined = pd.merge(
+        r[["local", "price_eur"]],
+        f[["local", "price_eur_pred"]],
+        on="local",
+        how="outer",
+    ).sort_values("local")
+    return list(zip(joined["local"], joined["price_eur"], joined["price_eur_pred"], strict=True))
 
 
 def _fmt(v, digits: int = 1) -> str:
@@ -194,7 +229,7 @@ def section_html(view: dict) -> str:
 <section>
   <h2>{html.escape(view["name"])} <span class="day">{day}</span></h2>
   <div class="tiles">{tiles}</div>
-  {chart_svg(view)}
+  <div class="chart">{chart_svg(view, interactive=True)}<div class="tip" hidden></div></div>
   <p class="legend"><span class="swatch actual"></span>Realised price
     <span class="swatch forecast"></span>Forecast (LEAR within the market's price limits)
     <span class="swatch next"></span>Tomorrow · model status: {html.escape(status_text)}</p>
@@ -234,8 +269,18 @@ svg {{ width:100%; height:auto; display:block; }}
 .actual {{ fill:none; stroke:var(--ink); stroke-width:2; }}
 .forecast {{ fill:none; stroke:var(--forecast); stroke-width:2; }}
 .next {{ fill:var(--next); }}
-.hit {{ fill:transparent; }}
-.hit:hover {{ fill:var(--forecast); }}
+.chart {{ position:relative; }}
+.chart svg {{ touch-action:pan-y; cursor:crosshair; }}
+.cross {{ stroke:var(--ink2); stroke-width:1; stroke-dasharray:3 3; visibility:hidden; }}
+.dot {{ stroke:var(--surface); stroke-width:2; }}
+.actual-dot {{ fill:var(--ink); }} .forecast-dot {{ fill:var(--forecast); }}
+.tip {{ position:absolute; top:4px; pointer-events:none; background:var(--surface);
+  border:1px solid var(--grid); border-radius:8px; padding:6px 10px; font-size:12px;
+  line-height:1.5; white-space:nowrap; box-shadow:0 2px 8px #0000001f;
+  font-variant-numeric:tabular-nums; }}
+.tip b {{ display:block; color:var(--ink); }}
+.tip .k {{ display:inline-block; width:10px; height:3px; vertical-align:middle;
+  margin-right:6px; }}
 .legend {{ color:var(--ink2); font-size:13px; margin:8px 0 0; }}
 .swatch {{ display:inline-block; width:14px; height:3px; vertical-align:middle;
   margin:0 4px 0 10px; }}
@@ -252,7 +297,49 @@ before the day-ahead auction closes, from that day's prices and weather forecast
 {sections}
 <footer>Updated {updated} UTC · <a href="{repo}">source and method</a> · Data: Energy-Charts
 (Bundesnetzagentur | SMARD.de, CC BY 4.0), EPİAŞ Transparency Platform, Open-Meteo.</footer>
-</main></body>
+</main>
+<script>
+// Hover or tap a chart: crosshair on the nearest hour, with its date, realised and forecast price.
+document.querySelectorAll(".chart").forEach(function (box) {{
+  var svg = box.querySelector("svg"), tip = box.querySelector(".tip");
+  var cross = svg.querySelector(".cross"), da = svg.querySelector(".actual-dot");
+  var df = svg.querySelector(".forecast-dot");
+  var pts = JSON.parse(svg.dataset.points), ys = JSON.parse(svg.dataset.y);
+  var width = svg.viewBox.baseVal.width;
+  function place(dot, y, x) {{
+    dot.setAttribute("cx", y === null ? -10 : x); dot.setAttribute("cy", y === null ? -10 : y);
+  }}
+  function show(e) {{
+    var r = svg.getBoundingClientRect(), vx = (e.clientX - r.left) * width / r.width;
+    var lo = 0, hi = pts.length - 1;
+    while (hi - lo > 1) {{
+      var mid = (lo + hi) >> 1;
+      if (pts[mid].x < vx) lo = mid; else hi = mid;
+    }}
+    var i = Math.abs(pts[lo].x - vx) <= Math.abs(pts[hi].x - vx) ? lo : hi, p = pts[i];
+    cross.setAttribute("x1", p.x); cross.setAttribute("x2", p.x);
+    cross.style.visibility = "visible";
+    place(da, ys[i].ya, p.x); place(df, ys[i].yf, p.x);
+    tip.innerHTML = "<b>" + p.t + "</b>" +
+      "<span class='k' style='background:var(--ink)'></span>Realised " + p.a + "<br>" +
+      "<span class='k' style='background:var(--forecast)'></span>Forecast " + p.f +
+      " <span style='color:var(--ink2)'>EUR/MWh</span>";
+    tip.hidden = false;
+    var px = p.x * r.width / width, w = tip.offsetWidth;
+    tip.style.left = (px + 12 + w > r.width ? Math.max(0, px - 12 - w) : px + 12) + "px";
+  }}
+  function hide() {{
+    tip.hidden = true; cross.style.visibility = "hidden"; place(da, null); place(df, null);
+  }}
+  svg.addEventListener("pointermove", show);
+  svg.addEventListener("pointerdown", show);
+  // A mouse leaving hides the readout; on touch screens lifting the finger also "leaves", so
+  // there the readout stays until the next tap outside the chart.
+  svg.addEventListener("pointerleave", function (e) {{ if (e.pointerType === "mouse") hide(); }});
+  document.addEventListener("pointerdown", function (e) {{ if (!box.contains(e.target)) hide(); }});
+}});
+</script>
+</body>
 </html>
 """
 

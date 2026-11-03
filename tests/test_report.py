@@ -99,3 +99,25 @@ def test_latest_svg_is_a_standalone_image(tmp_path):
     assert "Germany-Luxembourg" in svg
     assert "Tomorrow, 04 Nov: 159.5 EUR/MWh" in svg
     assert "Updated 2026-11-03 12:00 UTC" in svg
+
+
+def test_page_charts_carry_the_hourly_readout(tmp_path):
+    """Hovering or tapping a chart shows the hour's date, realised and forecast price."""
+    import html as html_lib
+    import json
+    import re
+
+    warehouse = tmp_path / "w.duckdb"
+    _fill(warehouse)
+    page = report.build(tmp_path / "site", warehouse).read_text(encoding="utf-8")
+    svg = (tmp_path / "site" / "latest.svg").read_text(encoding="utf-8")
+
+    points = json.loads(html_lib.unescape(re.search(r'data-points="([^"]*)"', page).group(1)))
+    heights = json.loads(html_lib.unescape(re.search(r'data-y="([^"]*)"', page).group(1)))
+    assert len(points) == len(heights) == 72
+    assert [p["x"] for p in points] == sorted(p["x"] for p in points)
+    assert points[0] == {"x": points[0]["x"], "t": "Mon 02 Nov, 00:00", "a": "110.0", "f": "100.0"}
+    assert points[-1]["t"] == "Wed 04 Nov, 23:00" and points[-1]["a"] == "–"
+    assert heights[-1]["ya"] is None and heights[-1]["yf"] is not None
+    assert 'class="cross"' in page and "<script>" in page
+    assert "data-points" not in svg and "<script" not in svg  # the README image stays static
