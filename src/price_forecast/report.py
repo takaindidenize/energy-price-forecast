@@ -279,8 +279,79 @@ def build(
     path.write_text(
         PAGE.format(sections=sections, updated=updated, repo=REPO_URL), encoding="utf-8"
     )
-    log.info("wrote %s (%d market(s))", path, len(views))
+    (out_dir / "latest.svg").write_text(latest_svg(views, updated), encoding="utf-8")
+    log.info("wrote %s and latest.svg (%d market(s))", path, len(views))
     return path
+
+
+SVG_STYLE = """<style>
+.bg { fill:#fcfcfb; stroke:#e4e3df; } .h1 { fill:#0b0b0b; font-size:18px; font-weight:600; }
+.h2 { fill:#0b0b0b; font-size:15px; font-weight:600; } .sub { fill:#52514e; font-size:12px; }
+.grid { stroke:#e4e3df; stroke-width:1; } .tick { fill:#52514e; font-size:11px; }
+.actual { fill:none; stroke:#0b0b0b; stroke-width:2; }
+.forecast { fill:none; stroke:#2a78d6; stroke-width:2; } .forecast-key { fill:#2a78d6; }
+.actual-key { fill:#0b0b0b; } .next { fill:#2a78d614; } .hit { fill:transparent; }
+@media (prefers-color-scheme: dark) {
+  .bg { fill:#1a1a19; stroke:#383835; } .h1, .h2 { fill:#f0efec; } .sub, .tick { fill:#c3c2b7; }
+  .grid { stroke:#383835; } .actual { stroke:#f0efec; } .actual-key { fill:#f0efec; }
+  .forecast { stroke:#3987e5; } .forecast-key { fill:#3987e5; } .next { fill:#3987e51f; }
+}
+</style>"""
+
+
+def latest_svg(views: list[dict], updated: str) -> str:
+    """One self-contained SVG with every market's chart, for embedding as an image in the README.
+
+    GitHub shows README images through a caching proxy, so the image is at most a few hours old.
+    """
+    header, panel = 40, 44 + _H
+    height = header + len(views) * (panel + 12) + 30
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {_W} {height}" width="{_W}" '
+        f'height="{height}" font-family="system-ui,-apple-system,Segoe UI,sans-serif" '
+        'role="img" aria-label="Latest day-ahead price forecasts">',
+        SVG_STYLE,
+        f'<rect class="bg" x="0.5" y="0.5" width="{_W - 1}" height="{height - 1}" rx="12"/>',
+        '<text class="h1" x="16" y="28">Day-ahead electricity price forecast</text>',
+    ]
+    y = header
+    for view in views:
+        t = view["tomorrow"]
+        mae, naive, days = _accuracy(view)
+        summary = (
+            f"Tomorrow, {view['next_day']:%d %b}: {_fmt(t['price_eur_pred'].mean())} EUR/MWh "
+            f"on average · MAE over the last {days} days {_fmt(mae)} (seasonal naive {_fmt(naive)})"
+        )
+        parts.append(f'<text class="h2" x="16" y="{y + 18}">{html.escape(view["name"])}</text>')
+        parts.append(f'<text class="sub" x="16" y="{y + 36}">{html.escape(summary)}</text>')
+        chart = chart_svg(view).replace(
+            "<svg viewBox=", f'<svg x="0" y="{y + 44}" width="{_W}" height="{_H}" viewBox=', 1
+        )
+        parts.append(chart)
+        y += panel + 12
+    parts.append(
+        f'<rect class="actual-key" x="16" y="{y + 4}" width="14" height="3"/>'
+        f'<text class="sub" x="36" y="{y + 9}">Realised</text>'
+        f'<rect class="forecast-key" x="100" y="{y + 4}" width="14" height="3"/>'
+        f'<text class="sub" x="120" y="{y + 9}">Forecast (EUR/MWh, local time)</text>'
+        f'<text class="sub" x="{_W - 16}" y="{y + 9}" text-anchor="end">'
+        f"Updated {updated} UTC</text>"
+    )
+    if not views:
+        parts.append(f'<text class="sub" x="16" y="{header + 20}">No forecasts yet.</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _accuracy(view: dict) -> tuple[float | None, float | None, int]:
+    st = view["status"]
+    model = st.loc[MODEL] if MODEL in st.index else None
+    base = st.loc[BASELINE] if BASELINE in st.index else None
+    return (
+        model["window_mae"] if model is not None else None,
+        base["window_mae"] if base is not None else None,
+        int(model["window_n_days"]) if model is not None else 0,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

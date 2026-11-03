@@ -42,3 +42,10 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       (07:30 UTC). Pages deploys once the repository is public.
 - [ ] Investigate the German under-forecast since 28 October 2026 (prices ~250 EUR/MWh, model ~50
       below): a calibration window instead of an expanding one, or gas prices as a feature.
+
+## On publication (making the repository public)
+- [ ] Settings → Pages → Source: "GitHub Actions"; the next daily run deploys the dashboard.
+- [ ] In the README's "Live forecasts" section, uncomment the live `latest.svg` image and
+      dashboard link, and drop the static screenshot.
+- [ ] Check the README renders the live image (GitHub's image proxy may take a few hours).
+

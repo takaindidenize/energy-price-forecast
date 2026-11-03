@@ -83,3 +83,19 @@ def test_nice_ticks_cover_the_range():
     ticks = report._nice_ticks(-12.0, 87.0)
     assert ticks[0] <= -12.0 and ticks[-1] >= 87.0
     assert len(set(round(b - a, 6) for a, b in zip(ticks, ticks[1:], strict=False))) == 1
+
+
+def test_latest_svg_is_a_standalone_image(tmp_path):
+    import xml.dom.minidom
+
+    warehouse = tmp_path / "w.duckdb"
+    _fill(warehouse)
+    report.build(tmp_path / "site", warehouse, now=datetime(2026, 11, 3, 12, tzinfo=UTC))
+    svg = (tmp_path / "site" / "latest.svg").read_text(encoding="utf-8")
+
+    doc = xml.dom.minidom.parseString(svg)  # well-formed, so browsers render it as an <img>
+    assert doc.documentElement.getAttribute("xmlns") == "http://www.w3.org/2000/svg"
+    assert "<style>" in svg and "prefers-color-scheme: dark" in svg  # no external CSS
+    assert "Germany-Luxembourg" in svg
+    assert "Tomorrow, 04 Nov: 159.5 EUR/MWh" in svg
+    assert "Updated 2026-11-03 12:00 UTC" in svg
