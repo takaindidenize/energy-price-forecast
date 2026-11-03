@@ -153,6 +153,18 @@ def fetch_point_month(client: httpx.Client, point: WeatherPoint, month: str) -> 
     For the current month only the days up to `FORECAST_HORIZON_DAYS` ahead are fetched.
     """
     start, end = _fetch_window(month)
+    return fetch_point(client, point, start, end, month)
+
+
+def fetch_point(
+    client: httpx.Client, point: WeatherPoint, start: pd.Timestamp, end: pd.Timestamp, label: str
+) -> pd.DataFrame:
+    """Hourly values for one point over UTC [start, end), in one request per API.
+
+    The APIs return a whole year in one response, so a long range is far fewer requests than one
+    per month; that matters on shared CI runners, where each Open-Meteo request can take a minute.
+    """
+    month = label
     if end <= start:
         return pd.DataFrame(columns=["valid_time", *config.WEATHER_VARIABLES])
     first_day, last_day = f"{start:%Y-%m-%d}", f"{end - timedelta(days=1):%Y-%m-%d}"
@@ -233,23 +245,52 @@ def _check_quality(df: pd.DataFrame, market: str, month: str, n_hours: int) -> p
 
 def ingest_month(market: str, month: str) -> Path | None:
     """Fetch one UTC month for every weather point of `market` and write its partition."""
-    points = config.MARKETS[market].weather_points
+    written, _ = ingest_months(market, [month])
+    return written[0] if written else None
+
+
+def ingest_months(market: str, months: list[str]) -> tuple[list[Path], list[str]]:
+    """Fetch `months` for every weather point with one request per point and calendar year, then
+    write one partition per month. Returns (written paths, months without data)."""
+    by_year: dict[str, list[str]] = {}
+    for month in months:
+        by_year.setdefault(month[:4], []).append(month)
+    written: list[Path] = []
+    empty: list[str] = []
+    with new_client() as client:
+        for year_months in by_year.values():
+            start = _fetch_window(year_months[0])[0]
+            end = _fetch_window(year_months[-1])[1]
+            frames = []
+            for point in config.MARKETS[market].weather_points:
+                label = f"{year_months[0]}..{year_months[-1]}"
+                df = fetch_point(client, point, start, end, label)
+                if not df.empty:
+                    frames.append(df.assign(point=point.name))
+            data = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            for month in year_months:
+                path = _write_month(market, month, data)
+                if path is None:
+                    empty.append(month)
+                else:
+                    written.append(path)
+    return written, empty
+
+
+def _write_month(market: str, month: str, data: pd.DataFrame) -> Path | None:
     start, end = _fetch_window(month)
     n_hours = max(0, int((end - start) / timedelta(hours=1)))
-
-    frames = []
-    with new_client() as client:
-        for point in points:
-            df = fetch_point_month(client, point, month)
-            if df.empty:
-                log.warning("%s %s: no weather data for %s", market, month, point.name)
-                continue
-            frames.append(df.assign(point=point.name))
-    if not frames:
+    if data.empty:
+        df = data
+    else:
+        df = data[(data["valid_time"] >= start) & (data["valid_time"] < end)]
+    if df.empty:
         log.warning("%s %s: no weather data at any point, nothing written", market, month)
         return None
+    for point in config.MARKETS[market].weather_points:
+        if not (df["point"] == point.name).any():
+            log.warning("%s %s: no weather data for %s", market, month, point.name)
 
-    df = pd.concat(frames, ignore_index=True)
     df = _check_quality(df, market, month, n_hours)
     df = df.sort_values(["point", "valid_time"], ignore_index=True)
     df["loaded_at"] = pd.Timestamp(utc_now_naive()).as_unit("us")
@@ -261,7 +302,12 @@ def ingest_month(market: str, month: str) -> Path | None:
         table, config.month_partition_path(config.WEATHER_RAW_DIR, market, month)
     )
     log.info(
-        "%s %s: wrote %d rows for %d point(s) to %s", market, month, len(df), len(frames), path
+        "%s %s: wrote %d rows for %d point(s) to %s",
+        market,
+        month,
+        len(df),
+        df["point"].nunique(),
+        path,
     )
     return path
 
@@ -276,13 +322,8 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
 
-    written = skipped = 0
-    for month in iter_months(args.start, args.end):
-        if ingest_month(args.market, month) is None:
-            skipped += 1
-        else:
-            written += 1
-    log.info("Done: %d month(s) written, %d without data", written, skipped)
+    written, empty = ingest_months(args.market, list(iter_months(args.start, args.end)))
+    log.info("Done: %d month(s) written, %d without data", len(written), len(empty))
     return 0
 
 

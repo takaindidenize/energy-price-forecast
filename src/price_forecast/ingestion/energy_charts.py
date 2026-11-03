@@ -60,7 +60,8 @@ PRICES_SCHEMA = pa.schema(
 
 # --- shared HTTP and partition helpers ------------------------------------------------------------
 
-HTTP_TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+# Generous read timeout: from shared CI runners an Open-Meteo response can take over a minute.
+HTTP_TIMEOUT = httpx.Timeout(180.0, connect=15.0)
 USER_AGENT = "energy-price-forecast/0.1 (portfolio project)"
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 6

@@ -3,8 +3,13 @@
 #
 # Storage: data/ (raw Parquet + warehouse.duckdb) is carried from run to run in the Actions cache.
 # When the cache is empty (first run, or evicted after 7 days without a run) the job ingests the
-# full history again, about 15 minutes, and the forecast history on the dashboard starts over;
-# run it once by hand with `backfill_days` to refill it.
+# history again and the forecast history on the dashboard starts over; run it once by hand with
+# `backfill_days` to refill it.
+#
+# History: the live models train on data from PF_START_MONTH (January 2025), not 2023 as in the
+# README's backtest. On GitHub's shared runners each Open-Meteo request can take about a minute,
+# so the weather is fetched one year per request and the history kept short; nearly two years is
+# also what the 2025 backtest trained on, and recent data matters more after regime changes.
 #
 # To switch it on, the repository owner has to:
 #   1. Add the repository secrets EPIAS_USERNAME and EPIAS_PASSWORD (Settings → Secrets and
@@ -38,9 +43,10 @@ concurrency:
 jobs:
   forecast:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       PF_DATA_DIR: ${{ github.workspace }}/data
+      PF_START_MONTH: "2025-01"
       EPIAS_USERNAME: ${{ secrets.EPIAS_USERNAME }}
       EPIAS_PASSWORD: ${{ secrets.EPIAS_PASSWORD }}
     steps:

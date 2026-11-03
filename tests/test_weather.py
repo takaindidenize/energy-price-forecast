@@ -258,12 +258,33 @@ def test_wind_speed_100m_interpolation():
     assert pd.isna(out[3])
 
 
-def test_cli_iterates_months(monkeypatch):
+def test_cli_passes_the_whole_range(monkeypatch):
     calls = []
-    monkeypatch.setattr(weather, "ingest_month", lambda mk, m: calls.append((mk, m)))
+    monkeypatch.setattr(
+        weather, "ingest_months", lambda mk, months: calls.append((mk, months)) or ([], [])
+    )
 
     assert weather.main(["--market", "tr", "--start", "2024-12", "--end", "2025-01"]) == 0
-    assert calls == [("tr", "2024-12"), ("tr", "2025-01")]
+    assert calls == [("tr", ["2024-12", "2025-01"])]
+
+
+@respx.mock
+def test_a_range_is_one_request_per_point_and_year(data_dir):
+    """On CI runners each Open-Meteo request can take a minute: never ask month by month."""
+    api = FakeOpenMeteo("open_meteo_historical_forecast.json")
+    respx.get(FORECAST_URL).mock(side_effect=api)
+
+    written, empty = weather.ingest_months("de_lu", ["2024-11", "2024-12", "2025-01"])
+
+    assert empty == []
+    assert [p.parent.name for p in written] == ["month=11", "month=12", "month=01"]
+    ranges = sorted({(r.url.params["start_date"], r.url.params["end_date"]) for r in api.requests})
+    assert ranges == [("2024-11-01", "2024-12-31"), ("2025-01-01", "2025-01-31")]
+    assert len(api.requests) == 2 * len(DE_POINTS)
+    hours = duckdb.sql(f"SELECT count(*) FROM read_parquet('{written[1].as_posix()}')").fetchall()[
+        0
+    ]
+    assert hours[0] == 31 * 24 * len(DE_POINTS)  # December only, though fetched with November
 
 
 def test_current_month_is_cut_at_the_forecast_horizon(monkeypatch):
