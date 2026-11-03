@@ -76,14 +76,10 @@ model's output did more than switching to gradient boosting.
 
 ## Live forecasts
 
-<!-- When the repository is public and Pages is on, replace the screenshot below with the live
-     chart, which the daily job regenerates (GitHub caches README images for a few hours):
-
 [![Latest forecasts](https://takaindidenize.github.io/energy-price-forecast/latest.svg)](https://takaindidenize.github.io/energy-price-forecast/)
 
-[Open the live dashboard](https://takaindidenize.github.io/energy-price-forecast/)
--->
-![Dashboard](docs/img/dashboard.png)
+**[Open the live dashboard](https://takaindidenize.github.io/energy-price-forecast/)**: the chart
+above is regenerated every morning (GitHub caches README images for a few hours).
 
 Every morning a GitHub Actions job ([`daily-pipeline.yml`](.github/workflows/daily-pipeline.yml))
 ingests the newest prices and weather forecasts, forecasts the next delivery day for both markets

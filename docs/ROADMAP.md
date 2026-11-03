@@ -44,8 +44,8 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       below): a calibration window instead of an expanding one, or gas prices as a feature.
 
 ## On publication (making the repository public)
-- [ ] Settings → Pages → Source: "GitHub Actions"; the next daily run deploys the dashboard.
-- [ ] In the README's "Live forecasts" section, uncomment the live `latest.svg` image and
-      dashboard link, and drop the static screenshot.
+- [x] Settings → Pages → Source: "GitHub Actions"; live at
+      https://takaindidenize.github.io/energy-price-forecast/ since 3 November 2026.
+- [x] README embeds the live `latest.svg` and links the dashboard.
 - [ ] Check the README renders the live image (GitHub's image proxy may take a few hours).
 
