@@ -11,12 +11,10 @@
 # so the weather is fetched one year per request and the history kept short; nearly two years is
 # also what the 2025 backtest trained on, and recent data matters more after regime changes.
 #
-# To switch it on, the repository owner has to:
-#   1. Add the repository secrets EPIAS_USERNAME and EPIAS_PASSWORD (Settings → Secrets and
-#      variables → Actions). Without them the Turkish market fails and Germany still runs.
-#   2. Enable Pages with "GitHub Actions" as the source (Settings → Pages). Pages needs a public
-#      repository on the free plan.
-#   3. Uncomment the schedule below.
+# Setup: the repository secrets EPIAS_USERNAME and EPIAS_PASSWORD (Settings → Secrets and
+# variables → Actions; without them the Turkish market fails and Germany still runs), and for the
+# dashboard Pages with "GitHub Actions" as the source (Settings → Pages), which on the free plan
+# needs a public repository. While the repository is private the page is built but not deployed.
 #
 # Timing: forecasts are issued at 11:00 local time, before the day-ahead auctions close (12:00 CET
 # in Germany, 12:30 TRT in Turkey). 07:30 UTC is before 11:00 in both markets all year; each
@@ -33,8 +31,8 @@ on:
         description: "Run for this many issue days ending at D (refills the dashboard history)"
         required: false
         default: "1"
-  # schedule:
-  #   - cron: "30 7 * * *"
+  schedule:
+    - cron: "30 7 * * *"
 
 concurrency:
   group: daily-forecast

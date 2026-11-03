@@ -38,6 +38,7 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       missing), run pipeline + monitor + report, deploy `site/` to GitHub Pages, save the cache.
       Needs from the owner: repo secrets `EPIAS_USERNAME` / `EPIAS_PASSWORD`, Pages enabled
       (public repo, or a paid plan for a private one), then uncomment the schedule.
-- [ ] Owner steps to go live: the secrets, Pages, the schedule (see the workflow's header).
+- [x] Live since 3 November 2026: secrets added, first full run green, daily schedule on
+      (07:30 UTC). Pages deploys once the repository is public.
 - [ ] Investigate the German under-forecast since 28 October 2026 (prices ~250 EUR/MWh, model ~50
       below): a calibration window instead of an expanding one, or gas prices as a feature.
