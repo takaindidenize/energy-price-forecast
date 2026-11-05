@@ -39,13 +39,17 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       Needs from the owner: repo secrets `EPIAS_USERNAME` / `EPIAS_PASSWORD`, Pages enabled
       (public repo, or a paid plan for a private one), then uncomment the schedule.
 - [x] Live since 3 November 2026: secrets added, first full run green, daily schedule on
-      (07:30 UTC). Pages deploys once the repository is public.
+      (five morning slots from 03:17 UTC, first success wins).
+- [x] Out-of-sample check on 2026 and more Turkish data: load plan and generation mix tested, not
+      adopted (`analysis/turkey_2026.py`).
 - [ ] Investigate the German under-forecast since 28 October 2026 (prices ~250 EUR/MWh, model ~50
-      below): a calibration window instead of an expanding one, or gas prices as a feature.
+      below). A shorter training window did not help over the year; gas prices as a feature are
+      untested.
+- [ ] Turkey in low-price, high-hydro periods like spring 2026: the largest remaining error.
 
 ## On publication (making the repository public)
 - [x] Settings → Pages → Source: "GitHub Actions"; live at
       https://takaindidenize.github.io/energy-price-forecast/ since 3 November 2026.
 - [x] README embeds the live `latest.svg` and links the dashboard.
-- [ ] Check the README renders the live image (GitHub's image proxy may take a few hours).
+- [x] Check the README renders the live image (GitHub's image proxy may take a few hours).
 

@@ -47,13 +47,14 @@ trained on, so it is naturally bounded, which is its whole advantage:
 | LEAR, never below zero (a fixed market rule) | 6.23 |
 | **LEAR, bounded: within zero and the cap** (`lear_bounded`, the pipeline's default) | **5.94** |
 
-Keeping LEAR within the market's bounds makes it the best model in every situation: its error on
-zero-price hours falls from 48.0 to 0.8 EUR/MWh. The bounds live in
+In 2025, keeping LEAR within the market's bounds makes it the best model in every situation: its
+error on zero-price hours falls from 48.0 to 0.8 EUR/MWh. The bounds live in
 [`bounds.py`](src/price_forecast/bounds.py) and any model can use them (`make_model("<name>_bounded")`).
 The cap is converted to EUR with the issue day's exchange rate, so nothing unknown at forecast
 time is used. The cap schedule is in `config.py`: 4,200 TRY in January 2023, cut to 2,600 by
-April 2023, then 2,700, 3,000 and 3,400 from April 2025. Where the regulator's (EPDK) decision
-could not be found, the date is the first day the market cleared at the new cap.
+April 2023, then 2,700, 3,000, 3,400 from April 2025 and 4,500 from April 2026. Where the
+regulator's (EPDK) decision could not be found, the date is the first day the market cleared at
+the new cap.
 
 ![Example weeks](docs/img/example_weeks.png)
 
@@ -71,6 +72,47 @@ swing from week to week; the models stay much flatter. The switch to 15-minute d
 
 **Takeaway.** Knowing the market's rules beat changing the model: a two-line bound on the linear
 model's output did more than switching to gradient boosting.
+
+## Does it hold on 2026?
+
+The model was chosen on 2025, so 2026 (1 January to 4 November) is a real out-of-sample test. All
+forecasts are kept within the price limits.
+
+| Period | Mean price | MAE | MAE / mean price | rMAE |
+|---|---:|---:|---:|---:|
+| Germany-Luxembourg 2025 | 89.3 | 15.9 | 17.8% | 0.48 |
+| Germany-Luxembourg 2026 | 115.8 | 22.2 | 19.2% | 0.51 |
+| Turkey 2025 | 58.9 | 5.9 | 10.1% | 0.65 |
+| Turkey 2026 | 39.0 | 9.4 | 24.1% | 0.77 |
+
+**Germany holds; Turkey gets much harder.** In 2026 LightGBM also edges ahead of LEAR in Turkey
+(9.04 vs 9.40 EUR/MWh), so "LEAR is best" is a 2025 result there. LEAR stays the default because
+it wins clearly in Germany (22.2 vs 25.5) and the Turkish gap is small and changes sign by year.
+
+![Turkey in 2025 and 2026](docs/img/turkey_2026.png)
+
+The error peaks in spring 2026, when hydro generation reached 47–50% of the total against about
+30% a year earlier, the mean price fell to 11–18 EUR/MWh and up to 29% of the hours in a month
+cleared at zero. These move together; the data does not prove the cause. The model had never seen
+such a period.
+
+**More data did not fix it.** I added the system operator's load plan and the realised generation
+mix (by source, from the last complete day) to the Turkish model and tested both years:
+
+| Model | MAE 2025 | MAE 2026 |
+|---|---:|---:|
+| LEAR | 5.94 | 9.40 |
+| LEAR + load plan | 5.87 | 9.57 |
+| LEAR + generation mix | 5.94 | 9.14 |
+| LEAR + both | 5.88 | 9.19 |
+
+The load plan helps a little in 2025 and hurts in 2026; the mix does nothing in 2025 and gains
+about 3% in 2026, mostly in April and May. The hydro share correlates strongly with the price
+(−0.49), yet adds little, probably because yesterday's prices already carry that information.
+Neither was added: the gain is not consistent, and the load plan could not be shown to be published
+by the 11:00 issue time. A shorter training window was no answer either: 180 days improves spring
+2026 in Turkey (16.5 to 11.6 EUR/MWh in April) but costs Germany 22.2 to 26.0 over the year. Full
+tables: [docs/analysis/turkey_2026.md](docs/analysis/turkey_2026.md).
 
 ## Live forecasts
 
@@ -133,7 +175,11 @@ Reproduce the analysis (after ingesting both markets for 2023–2025):
 pip install -e ".[analysis]"
 python analysis/run_backtests.py      # a few minutes; writes data/backtest_<market>_2025.parquet
 python analysis/error_analysis.py     # writes docs/analysis/results.md and docs/img/*.png
+python analysis/turkey_2026.py        # about ten minutes; needs data to 4 November 2026
 ```
+
+These backtests train on data from January 2023. The live job trains from January 2025, to keep
+its first download short.
 
 ## Data sources
 
