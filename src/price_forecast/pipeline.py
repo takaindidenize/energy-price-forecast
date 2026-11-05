@@ -413,10 +413,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     results = []
+    ingested: set[str] = set()
     for offset in range(args.days - 1, -1, -1):
         day = issue_date - timedelta(days=offset)
-        # Ingest once, on the first run: the later days only read what is already on disk.
-        ingest = not args.no_ingest and offset == args.days - 1
+        # Ingest each month once, when the first day that needs it comes up. A backfill must not
+        # stop at the oldest day's months, or the newest days run on old data.
+        months = set(months_to_ingest(day))
+        ingest = not args.no_ingest and not months <= ingested
+        ingested |= months
         results += run(markets, day, args.models, warehouse=args.warehouse, ingest=ingest)
     print(summary(results))
     return 0 if all(r.status == "ok" for r in results) else 1
