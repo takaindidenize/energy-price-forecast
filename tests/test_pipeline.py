@@ -1,6 +1,6 @@
 import sys
 import types
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -301,3 +301,24 @@ def test_cli_exit_code_reflects_failures(monkeypatch, warehouse, capsys):
 def test_cli_rejects_unknown_market():
     with pytest.raises(SystemExit):
         pipeline.main(["--market", "fr"])
+
+
+def test_backfill_ingests_every_month_it_needs_once(monkeypatch):
+    """A 14-day backfill across a month end must also fetch the newest month."""
+    runs = []
+    monkeypatch.setattr(
+        pipeline,
+        "run",
+        lambda markets, day, models, warehouse=None, ingest=True: runs.append((day, ingest)) or [],
+    )
+    assert pipeline.main(["--market", "de_lu", "--date", "2026-11-05", "--days", "14"]) == 0
+    assert [d for d, _ in runs] == [date(2026, 10, 23) + timedelta(days=i) for i in range(14)]
+    assert [d for d, ingest in runs if ingest] == [date(2026, 10, 23), date(2026, 10, 31)]
+
+    runs.clear()
+    pipeline.main(["--market", "de_lu", "--date", "2026-11-05"])
+    assert runs == [(date(2026, 11, 5), True)]  # the daily run always fetches
+
+    runs.clear()
+    pipeline.main(["--market", "de_lu", "--date", "2026-11-05", "--days", "3", "--no-ingest"])
+    assert not any(ingest for _, ingest in runs)
