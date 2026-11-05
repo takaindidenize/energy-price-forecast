@@ -70,6 +70,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
+from datetime import time as clock_time
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -98,6 +99,9 @@ TGT_LIFETIME = timedelta(hours=2)
 TGT_RENEW_MARGIN = timedelta(minutes=15)
 # A whole year works in one request (see module docstring), so a month is always one request.
 MAX_DAYS_PER_REQUEST = 31
+
+# The next day's prices can be requested from 14:00 Turkish time; five minutes of margin.
+PUBLISH_TIME_LOCAL = clock_time(14, 5)
 
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 6
@@ -140,6 +144,26 @@ class _RetryableStatus(Exception):
         super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
         self.retry_after = retry_after
+
+
+def _error_summary(response: httpx.Response) -> str:
+    """Only EPİAŞ's own error messages: its error bodies also carry the account's username and IP,
+    and this text ends up in logs."""
+    try:
+        errors = response.json().get("errors") or []
+        return "; ".join(str(e.get("errorMessage", "")) for e in errors)[:300] or "no details"
+    except (ValueError, AttributeError):
+        return "no details"
+
+
+def latest_published_day(now: datetime | None = None) -> date:
+    """The last local day whose prices can be requested.
+
+    The next day's prices appear after the auction, and until `PUBLISH_TIME_LOCAL` EPİAŞ rejects a
+    whole request (HTTP 400, "saat 14 öncesinde mevcut değil") if its end date is after today.
+    """
+    local = (now or datetime.now(UTC)).astimezone(_market_tz())
+    return local.date() + timedelta(days=1 if local.time() >= PUBLISH_TIME_LOCAL else 0)
 
 
 def _server_wait(response: httpx.Response) -> float | None:
@@ -339,8 +363,9 @@ class EpiasClient:
             log.info("EPİAŞ answered 401; renewing the ticket and retrying once")
             self._tgt = None
         if response.status_code >= 400:
-            snippet = response.text[:200].replace("\n", " ")
-            raise EpiasError(f"EPİAŞ answered HTTP {response.status_code} to {url}: {snippet}")
+            raise EpiasError(
+                f"EPİAŞ answered HTTP {response.status_code} to {url}: {_error_summary(response)}"
+            )
         try:
             return response.json()
         except ValueError:
@@ -460,6 +485,10 @@ def ingest_month(month: str, *, client: EpiasClient | None = None) -> Path | Non
     Re-running a month overwrites its partition.
     """
     first, last = _month_bounds(month)
+    last = min(last, latest_published_day())
+    if last < first:
+        log.info("No EPİAŞ PTF data for %s yet; nothing written", month)
+        return None
     own_client = client is None
     client = client or EpiasClient()
     frames = []

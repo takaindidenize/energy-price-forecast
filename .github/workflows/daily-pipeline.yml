@@ -16,9 +16,17 @@
 # dashboard Pages with "GitHub Actions" as the source (Settings → Pages), which on the free plan
 # needs a public repository. While the repository is private the page is built but not deployed.
 #
-# Timing: forecasts are issued at 11:00 local time, before the day-ahead auctions close (12:00 CET
-# in Germany, 12:30 TRT in Turkey). 07:30 UTC is before 11:00 in both markets all year; each
-# forecast is stored with the configured issue time, not the moment the job ran.
+# Timing: a forecast has to exist before the day-ahead auctions close (12:00 CET in Germany, 12:30
+# TRT in Turkey), or the next day's real prices are already out when the page is built. GitHub's
+# schedule is best effort: the first scheduled run of this workflow started 8 hours late. So it is
+# scheduled five times from 03:17 UTC, off the busy top of the hour, and the `gate` job ends a run
+# at once when today's forecast already succeeded. A failed run is tried again by the next slot.
+# Forecasts are stored with the configured issue time (11:00 local), not the moment the job ran;
+# the dashboard shows the real time. A late run cannot use the published prices (training and
+# features stop at the issue day), but it does see a fresher weather forecast.
+#
+# GitHub disables schedules after 60 days without any repository activity; re-enable it on the
+# Actions tab if that happens.
 name: Daily forecast
 
 on:
@@ -32,14 +40,32 @@ on:
         required: false
         default: "1"
   schedule:
-    - cron: "30 7 * * *"
+    - cron: "17 3-7 * * *"
 
 concurrency:
   group: daily-forecast
   cancel-in-progress: false
 
 jobs:
+  # Only the first successful run of the day forecasts. Started by hand, it always runs.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      day: ${{ steps.day.outputs.day }}
+      run: ${{ github.event_name == 'workflow_dispatch' || steps.done.outputs.cache-hit != 'true' }}
+    steps:
+      - id: day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - id: done
+        uses: actions/cache/restore@v4
+        with:
+          path: .forecast-done
+          key: forecast-done-${{ steps.day.outputs.day }}
+          lookup-only: true
+
   forecast:
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -103,6 +129,17 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+      - name: Prepare today's done marker
+        if: ${{ steps.pipeline.outcome == 'success' && !inputs.date }}
+        run: touch .forecast-done
+
+      - name: Mark today's forecast as done
+        if: ${{ steps.pipeline.outcome == 'success' && !inputs.date }}
+        uses: actions/cache/save@v4
+        with:
+          path: .forecast-done
+          key: forecast-done-${{ needs.gate.outputs.day }}
 
       - name: Fail the run if a market failed
         if: steps.pipeline.outcome == 'failure'

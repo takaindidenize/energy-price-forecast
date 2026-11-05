@@ -93,8 +93,12 @@ and 6.1 in Turkey (naive 10.8). German prices jumped to about 250 EUR/MWh from 2
 model has been forecasting about 50 below since: the dashboard shows it, and it is the next thing
 to investigate.
 
-Two lessons from going live:
+Three lessons from going live:
 
+- **Schedules are not punctual.** GitHub started the first scheduled run 8 hours late, after the
+  next day's prices were out, so the dashboard had no forecast still waiting for its result. The
+  job now has five morning slots and only the first success forecasts. A check on real data
+  confirmed a late run gets the same forecast with or without the published prices.
 - **Regulated limits change.** EPDK raised the Turkish cap from 3,400 to 4,500 TRY on 4 April
   2026, so a forecaster built on 2025 data clipped every higher price. The monitor now warns when
   realised prices break the configured limits.

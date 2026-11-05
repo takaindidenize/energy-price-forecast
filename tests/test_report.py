@@ -65,12 +65,13 @@ def test_report_shows_tomorrow_history_and_accuracy(tmp_path):
 
     assert "Germany-Luxembourg" in page
     assert "Turkey" not in page.split("<main>")[1].split("<footer>")[0].split("</p>", 1)[1]
-    assert "delivery day Wednesday 04 November 2026" in page
+    assert "Forecast for Wednesday 04 November 2026" in page
+    assert "were not published when this page was built" in page
     assert "159.5 EUR/MWh" in page  # mean of 148..171, the latest forecasts for 4 November
     assert "171.0 at 23:00" in page and "148.0 at 00:00" in page
     assert "10.0 (naive 20.0)" in page
     assert "-999" not in page
-    assert page.count("<svg") == 1
+    assert page.count("<svg") == 2  # the forecast day, then the history
     assert "Updated 2026-11-03 12:00 UTC" in page
 
 
@@ -97,7 +98,7 @@ def test_latest_svg_is_a_standalone_image(tmp_path):
     assert doc.documentElement.getAttribute("xmlns") == "http://www.w3.org/2000/svg"
     assert "<style>" in svg and "prefers-color-scheme: dark" in svg  # no external CSS
     assert "Germany-Luxembourg" in svg
-    assert "Tomorrow, 04 Nov: 159.5 EUR/MWh" in svg
+    assert "Forecast for 04 Nov: 159.5 EUR/MWh" in svg
     assert "Updated 2026-11-03 12:00 UTC" in svg
 
 
@@ -112,12 +113,46 @@ def test_page_charts_carry_the_hourly_readout(tmp_path):
     page = report.build(tmp_path / "site", warehouse).read_text(encoding="utf-8")
     svg = (tmp_path / "site" / "latest.svg").read_text(encoding="utf-8")
 
-    points = json.loads(html_lib.unescape(re.search(r'data-points="([^"]*)"', page).group(1)))
-    heights = json.loads(html_lib.unescape(re.search(r'data-y="([^"]*)"', page).group(1)))
-    assert len(points) == len(heights) == 72
+    charts = [json.loads(html_lib.unescape(c)) for c in re.findall(r'data-points="([^"]*)"', page)]
+    assert [len(c) for c in charts] == [24, 72]  # the forecast day alone, then the history
+    assert charts[0][0]["t"] == "Wed 04 Nov, 00:00" and charts[0][0]["a"] == "–"
+    points = charts[1]
+    heights = json.loads(html_lib.unescape(re.findall(r'data-y="([^"]*)"', page)[1]))
+    assert len(heights) == 72
     assert [p["x"] for p in points] == sorted(p["x"] for p in points)
     assert points[0] == {"x": points[0]["x"], "t": "Mon 02 Nov, 00:00", "a": "110.0", "f": "100.0"}
     assert points[-1]["t"] == "Wed 04 Nov, 23:00" and points[-1]["a"] == "–"
     assert heights[-1]["ya"] is None and heights[-1]["yf"] is not None
     assert 'class="cross"' in page and "<script>" in page
     assert "data-points" not in svg and "<script" not in svg  # the README image stays static
+
+
+def test_forecast_day_table_and_late_run_note(tmp_path):
+    """Before the prices are published only the forecast shows; a late run says why both do."""
+    warehouse = tmp_path / "w.duckdb"
+    _fill(warehouse)
+    page = report.build(tmp_path / "before", warehouse).read_text(encoding="utf-8")
+    table = page.split("<details>")[1].split("</details>")[0]
+    assert "<td>00:00</td><td>148.0</td></tr>" in table
+    assert "Actual</th>" not in table
+    assert table.count("<tr>") == 25
+
+    late = pd.DataFrame(
+        {
+            "market": "de_lu",
+            "delivery_hour": _hours("2026-11-03 23:00", 24),
+            "price_eur": 200.0,
+            "loaded_at": pd.Timestamp("2026-11-03 16:00"),
+        }
+    )
+    with store.session(warehouse) as con:
+        store.upsert(con, "realised_prices", late)
+        con.execute(
+            "INSERT INTO pipeline_runs VALUES ('de_lu', '2026-11-03', 'ok', "
+            "'2026-11-03 15:30', '2026-11-03 15:36', 'lear_bounded', '', 24, NULL)"
+        )
+    page = report.build(tmp_path / "after", warehouse).read_text(encoding="utf-8")
+    assert "Computed 03 Nov 15:36 UTC" in page
+    assert "the daily job started late" in page
+    table = page.split("<details>")[1].split("</details>")[0]
+    assert "<td>00:00</td><td>148.0</td><td>200.0</td></tr>" in table

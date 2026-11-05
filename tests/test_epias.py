@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import parse_qs
 
 import httpx
@@ -477,3 +477,48 @@ def test_cli_missing_credentials(monkeypatch, capsys, respx_mock):
 def test_cli_rejects_reversed_range():
     with pytest.raises(SystemExit):
         epias.main(["--start", "2024-02", "--end", "2024-01"])
+
+
+# -- publication time --------------------------------------------------------------------------
+
+
+def test_latest_published_day_follows_the_14_00_publication():
+    morning = datetime(2026, 11, 5, 9, 30, tzinfo=UTC)  # 12:30 in Turkey
+    afternoon = datetime(2026, 11, 5, 11, 10, tzinfo=UTC)  # 14:10 in Turkey
+    assert epias.latest_published_day(morning) == date(2026, 11, 5)
+    assert epias.latest_published_day(afternoon) == date(2026, 11, 6)
+
+
+def test_current_month_stops_at_the_latest_published_day(ticket_route, mcp_route, monkeypatch):
+    """Before 14:00 EPİAŞ rejects a whole request whose end date is after today."""
+    monkeypatch.setattr(epias, "latest_published_day", lambda: date(2026, 11, 5))
+    with make_client() as client:
+        path = epias.ingest_month("2026-11", client=client)
+    bodies = [json.loads(c.request.content) for c in mcp_route.calls]
+    assert [(b["startDate"][:10], b["endDate"][:10]) for b in bodies] == [
+        ("2026-11-01", "2026-11-05")
+    ]
+    assert read_partition("2026-11").num_rows == 5 * 24
+    assert path is not None
+
+
+def test_month_entirely_in_the_future_asks_nothing(ticket_route, mcp_route, monkeypatch):
+    monkeypatch.setattr(epias, "latest_published_day", lambda: date(2026, 11, 30))
+    with make_client() as client:
+        assert epias.ingest_month("2026-12", client=client) is None
+    assert mcp_route.call_count == 0
+
+
+def test_error_text_has_the_message_but_not_the_account(ticket_route, mcp_route):
+    body = {
+        "status": "400 BAD_REQUEST",
+        "clientIp": "203.0.113.7",
+        "userName": FAKE_USER,
+        "errors": [{"errorCode": "(BUS)SEF1124", "errorMessage": "veri mevcut değil"}],
+    }
+    mcp_route.mock(return_value=httpx.Response(400, json=body))
+    with make_client() as client, pytest.raises(epias.EpiasError) as info:
+        client.fetch_mcp(date(2024, 1, 1), date(2024, 1, 1))
+    text = str(info.value)
+    assert "veri mevcut değil" in text
+    assert FAKE_USER not in text and "203.0.113.7" not in text

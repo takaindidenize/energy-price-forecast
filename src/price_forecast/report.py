@@ -1,9 +1,9 @@
 """A static HTML page with the latest forecasts and their accuracy, for GitHub Pages.
 
 Reads the warehouse (forecasts, realised prices, model status) and writes `<out>/index.html`: per
-market, tomorrow's forecast, the last `history_days` days of forecast against the realised price,
-and the rolling accuracy against the seasonal naive. Inline SVG, no scripts, no external assets,
-light and dark themes.
+market, the latest forecast hour by hour, the last `history_days` days of forecast against the
+realised price, and the rolling accuracy against the seasonal naive. Inline SVG and one small
+script, no external assets, light and dark themes.
 
     python -m price_forecast.report --out site
 """
@@ -56,6 +56,7 @@ def market_view(
     realised: pd.DataFrame,
     status: pd.DataFrame,
     history_days: int = HISTORY_DAYS,
+    runs: pd.DataFrame | None = None,
 ) -> dict | None:
     """Everything one market's section shows, or None when it has no forecasts yet."""
     tz = config.MARKETS[market].timezone
@@ -74,12 +75,21 @@ def market_view(
     tomorrow = f[f["local"].dt.date == next_day]
     joined = f.merge(r[["delivery_hour", "price_eur"]], on="delivery_hour", how="inner")
     st = status[status["market"] == market].set_index("model")
+    computed_at = None
+    if runs is not None and not runs.empty:
+        run = runs[
+            (runs["market"] == market)
+            & (pd.to_datetime(runs["issue_date"]).dt.date == next_day - timedelta(days=1))
+        ]
+        computed_at = pd.to_datetime(run["finished_at"]).max() if not run.empty else None
     return {
         "market": market,
         "name": config.MARKETS[market].name,
         "timezone": tz,
         "next_day": next_day,
         "tomorrow": tomorrow,
+        "next_realised": r[r["local"].dt.date == next_day],
+        "computed_at": computed_at,
         "forecasts": f,
         "realised": r,
         "history_mae": (joined["price_eur_pred"] - joined["price_eur"]).abs().mean()
@@ -101,14 +111,18 @@ def _nice_ticks(lo: float, hi: float, n: int = 5) -> list[float]:
     return [round(t, 6) for t in ticks]
 
 
-def chart_svg(view: dict, interactive: bool = False) -> str:
+def chart_svg(view: dict, interactive: bool = False, one_day: bool = False) -> str:
     """The chart as an inline SVG.
+
+    `one_day` draws only the latest forecast day, with an hourly axis.
 
     `interactive` adds what the page's script needs for the hover/tap readout: the hourly points
     as JSON in `data-points` and a hidden crosshair. The README image (`latest.svg`) is shown as
     a plain <img>, where no script runs, so it is drawn without them.
     """
     f, r = view["forecasts"], view["realised"]
+    if one_day:
+        f, r = view["tomorrow"], view["next_realised"]
     times = pd.concat([f["local"], r["local"]])
     t0, t1 = times.min(), times.max() + pd.Timedelta(hours=1)
     values = pd.concat([f["price_eur_pred"], r["price_eur"]]).dropna()
@@ -141,24 +155,26 @@ def chart_svg(view: dict, interactive: bool = False) -> str:
         f'<svg viewBox="0 0 {_W} {_H}" role="img" aria-label="Forecast and realised price, '
         f'{html.escape(view["name"])}"{data}>'
     ]
-    next_start = pd.Timestamp(view["next_day"]).tz_localize(view["timezone"])
-    parts.append(
-        f'<rect class="next" x="{x(next_start):.1f}" y="{_PAD_T}" '
-        f'width="{x(t1) - x(next_start):.1f}" height="{_H - _PAD_T - _PAD_B}"/>'
-    )
+    if not one_day:
+        next_start = pd.Timestamp(view["next_day"]).tz_localize(view["timezone"])
+        parts.append(
+            f'<rect class="next" x="{x(next_start):.1f}" y="{_PAD_T}" '
+            f'width="{x(t1) - x(next_start):.1f}" height="{_H - _PAD_T - _PAD_B}"/>'
+        )
     for v in ticks:
         parts.append(
             f'<line class="grid" x1="{_PAD_L}" x2="{_W - _PAD_R}" y1="{y(v):.1f}" y2="{y(v):.1f}"/>'
             f'<text class="tick" x="{_PAD_L - 6}" y="{y(v) + 4:.1f}" text-anchor="end">{v:g}</text>'
         )
-    day = t0.normalize()
-    while day <= t1:
-        if day >= t0:
+    tick = t0.normalize()
+    step, label = (pd.Timedelta(hours=3), "%H:%M") if one_day else (pd.Timedelta(days=2), "%d %b")
+    while tick < t1:  # the end of the axis has no label of its own: it would be cut off
+        if tick >= t0:
             parts.append(
-                f'<text class="tick" x="{x(day):.1f}" y="{_H - 8}" text-anchor="middle">'
-                f"{day:%d %b}</text>"
+                f'<text class="tick" x="{x(tick):.1f}" y="{_H - 8}" text-anchor="middle">'
+                f"{tick.strftime(label)}</text>"
             )
-        day += pd.Timedelta(days=2)
+        tick += step
     parts.append(f'<path class="actual" d="{path(r["local"], r["price_eur"])}"/>')
     parts.append(f'<path class="forecast" d="{path(f["local"], f["price_eur_pred"])}"/>')
     if interactive:
@@ -204,7 +220,7 @@ def section_html(view: dict) -> str:
         else ("ok" if model_row is not None else "no accuracy yet")
     )
     stats = [
-        ("Tomorrow, average", f"{_fmt(t['price_eur_pred'].mean())} EUR/MWh"),
+        ("Average", f"{_fmt(t['price_eur_pred'].mean())} EUR/MWh"),
         (
             "Highest hour",
             f"{_fmt(peak['price_eur_pred'])} at {peak['local']:%H:%M}" if peak is not None else "–",
@@ -224,16 +240,49 @@ def section_html(view: dict) -> str:
         f'<div class="value">{html.escape(v)}</div></div>'
         for k, v in stats
     )
-    day = f"delivery day {view['next_day']:%A %d %B %Y}"
+    status_html = html.escape(status_text)
     return f"""
 <section>
-  <h2>{html.escape(view["name"])} <span class="day">{day}</span></h2>
+  <h2>{html.escape(view["name"])}</h2>
+  <h3>Forecast for {view["next_day"]:%A %d %B %Y}</h3>
+  <p class="note">{html.escape(_forecast_note(view))}</p>
   <div class="tiles">{tiles}</div>
+  <div class="chart">{chart_svg(view, True, one_day=True)}<div class="tip" hidden></div></div>
+  {_hours_table(view)}
+  <h3>Forecast against realised prices, last {HISTORY_DAYS} days</h3>
   <div class="chart">{chart_svg(view, interactive=True)}<div class="tip" hidden></div></div>
   <p class="legend"><span class="swatch actual"></span>Realised price
     <span class="swatch forecast"></span>Forecast (LEAR within the market's price limits)
-    <span class="swatch next"></span>Tomorrow · model status: {html.escape(status_text)}</p>
+    <span class="swatch next"></span>Latest forecast day · model status: {status_html}</p>
 </section>"""
+
+
+def _forecast_note(view: dict) -> str:
+    computed = view["computed_at"]
+    when = f"Computed {computed:%d %b %H:%M} UTC. " if computed is not None else ""
+    if view["next_realised"].empty:
+        return when + "Actual prices for this day were not published when this page was built."
+    return (
+        when + "Actual prices were already published when this page was built, because the daily "
+        "job started late, so they are shown too. The forecast did not use them."
+    )
+
+
+def _hours_table(view: dict) -> str:
+    """Every hour of the latest forecast day, for reading exact values."""
+    points = _hourly_points(view["tomorrow"], view["next_realised"])
+    show_actual = not view["next_realised"].empty
+    head = "<th>Hour</th><th>Forecast</th>" + ("<th>Actual</th>" if show_actual else "")
+    rows = "".join(
+        f"<tr><td>{t:%H:%M}</td><td>{_fmt(p)}</td>"
+        + (f"<td>{_fmt(a)}</td>" if show_actual else "")
+        + "</tr>"
+        for t, a, p in points
+    )
+    return (
+        "<details><summary>All hours as a table (EUR/MWh)</summary>"
+        f"<table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table></details>"
+    )
 
 
 PAGE = """<!doctype html>
@@ -258,7 +307,14 @@ h1 {{ font-size:24px; margin:0 0 4px; }}
 section {{ background:var(--surface); border:1px solid var(--grid); border-radius:12px;
   padding:16px; margin-bottom:20px; }}
 h2 {{ font-size:18px; margin:0 0 12px; }}
-.day {{ color:var(--ink2); font-weight:400; font-size:14px; margin-left:6px; }}
+h3 {{ font-size:15px; margin:20px 0 4px; }}
+h2 + h3 {{ margin-top:0; }}
+.note {{ color:var(--ink2); font-size:13px; margin:0 0 12px; }}
+details {{ margin-top:8px; font-size:13px; }}
+summary {{ cursor:pointer; color:var(--ink2); }}
+table {{ border-collapse:collapse; margin-top:8px; font-variant-numeric:tabular-nums; }}
+th, td {{ padding:2px 20px 2px 0; text-align:right; border-bottom:1px solid var(--grid); }}
+th {{ color:var(--ink2); font-weight:500; }}
 .tiles {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;
   margin-bottom:12px; }}
 .tile .label {{ color:var(--ink2); font-size:12px; }}
@@ -321,7 +377,8 @@ document.querySelectorAll(".chart").forEach(function (box) {{
     cross.style.visibility = "visible";
     place(da, ys[i].ya, p.x); place(df, ys[i].yf, p.x);
     tip.innerHTML = "<b>" + p.t + "</b>" +
-      "<span class='k' style='background:var(--ink)'></span>Realised " + p.a + "<br>" +
+      "<span class='k' style='background:var(--ink)'></span>Realised " +
+      (p.a === "–" ? "not published yet" : p.a) + "<br>" +
       "<span class='k' style='background:var(--forecast)'></span>Forecast " + p.f +
       " <span style='color:var(--ink2)'>EUR/MWh</span>";
     tip.hidden = false;
@@ -354,10 +411,11 @@ def build(
         forecasts = latest_forecasts(con, MODEL)
         realised = con.execute("SELECT market, delivery_hour, price_eur FROM realised_prices").df()
         status = con.execute("SELECT * FROM model_status").df()
+        runs = con.execute("SELECT market, issue_date, finished_at FROM pipeline_runs").df()
     views = [
         v
         for m in config.MARKETS
-        if (v := market_view(m, forecasts, realised, status, history_days)) is not None
+        if (v := market_view(m, forecasts, realised, status, history_days, runs)) is not None
     ]
     sections = "".join(section_html(v) for v in views) or "<p>No forecasts yet.</p>"
     updated = (now or datetime.now(UTC)).strftime("%Y-%m-%d %H:%M")
@@ -406,7 +464,7 @@ def latest_svg(views: list[dict], updated: str) -> str:
         t = view["tomorrow"]
         mae, naive, days = _accuracy(view)
         summary = (
-            f"Tomorrow, {view['next_day']:%d %b}: {_fmt(t['price_eur_pred'].mean())} EUR/MWh "
+            f"Forecast for {view['next_day']:%d %b}: {_fmt(t['price_eur_pred'].mean())} EUR/MWh "
             f"on average · MAE over the last {days} days {_fmt(mae)} (seasonal naive {_fmt(naive)})"
         )
         parts.append(f'<text class="h2" x="16" y="{y + 18}">{html.escape(view["name"])}</text>')
