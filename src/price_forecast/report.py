@@ -23,7 +23,7 @@ from price_forecast import config, store
 
 log = logging.getLogger("price_forecast.report")
 
-MODEL = "lear_bounded"
+MODEL = "median_bounded"
 BASELINE = "seasonal_naive"
 HISTORY_DAYS = 14
 REPO_URL = "https://github.com/takaindidenize/energy-price-forecast"
@@ -252,7 +252,7 @@ def section_html(view: dict) -> str:
   <h3>Forecast against realised prices, last {HISTORY_DAYS} days</h3>
   <div class="chart">{chart_svg(view, interactive=True)}<div class="tip" hidden></div></div>
   <p class="legend"><span class="swatch actual"></span>Realised price
-    <span class="swatch forecast"></span>Forecast (LEAR within the market's price limits)
+    <span class="swatch forecast"></span>Forecast (median of three models, within price limits)
     <span class="swatch next"></span>Latest forecast day · model status: {status_html}</p>
 </section>"""
 

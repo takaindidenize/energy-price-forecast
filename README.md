@@ -45,7 +45,7 @@ trained on, so it is naturally bounded, which is its whole advantage:
 | LEAR | 6.61 |
 | LightGBM | 6.34 |
 | LEAR, never below zero (a fixed market rule) | 6.23 |
-| **LEAR, bounded: within zero and the cap** (`lear_bounded`, the pipeline's default) | **5.94** |
+| **LEAR, bounded: within zero and the cap** (`lear_bounded`) | **5.94** |
 
 In 2025, keeping LEAR within the market's bounds makes it the best model in every situation: its
 error on zero-price hours falls from 48.0 to 0.8 EUR/MWh. The bounds live in
@@ -86,8 +86,8 @@ forecasts are kept within the price limits.
 | Turkey 2026 | 39.0 | 9.4 | 24.1% | 0.77 |
 
 **Germany holds; Turkey gets much harder.** In 2026 LightGBM also edges ahead of LEAR in Turkey
-(9.04 vs 9.40 EUR/MWh), so "LEAR is best" is a 2025 result there. LEAR stays the default because
-it wins clearly in Germany (22.2 vs 25.5) and the Turkish gap is small and changes sign by year.
+(9.04 vs 9.40 EUR/MWh), so "LEAR is best" is a 2025 result there, while LEAR still wins clearly in
+Germany (22.2 vs 25.5).
 
 ![Turkey in 2025 and 2026](docs/img/turkey_2026.png)
 
@@ -110,9 +110,35 @@ The load plan helps a little in 2025 and hurts in 2026; the mix does nothing in 
 about 3% in 2026, mostly in April and May. The hydro share correlates strongly with the price
 (−0.49), yet adds little, probably because yesterday's prices already carry that information.
 Neither was added: the gain is not consistent, and the load plan could not be shown to be published
-by the 11:00 issue time. A shorter training window was no answer either: 180 days improves spring
-2026 in Turkey (16.5 to 11.6 EUR/MWh in April) but costs Germany 22.2 to 26.0 over the year. Full
-tables: [docs/analysis/turkey_2026.md](docs/analysis/turkey_2026.md).
+by the 11:00 issue time. A shorter training window was no answer on its own: 180 days improves
+spring 2026 in Turkey (16.5 to 11.6 EUR/MWh in April) but costs Germany over the year (22.2 to 24–26,
+depending on the day the weekly refits start). Full tables:
+[docs/analysis/turkey_2026.md](docs/analysis/turkey_2026.md).
+
+## Combining the models
+
+Different models fail at different times, so the next test was to combine them without any new
+data. The rule was fixed before the results: a method replaces LEAR only if it is better in all
+four market-years, reliably (paired t above 2 on daily errors).
+
+| MAE, EUR/MWh | Germany 2025 | Germany 2026 | Turkey 2025 | Turkey 2026 | Rule |
+|---|---:|---:|---:|---:|---|
+| LEAR (bounded) | 15.92 | 22.19 | 5.93 | 9.39 | |
+| **Median of three** | **15.51** | **21.56** | **5.69** | **8.42** | **passes** |
+| Mean of three | 15.53 | 21.94 | 5.63 | 8.39 | fails |
+| Median of three + 7-day error correction | 15.72 | 20.90 | 5.72 | 7.96 | fails |
+
+The three are LEAR on all history, LEAR on the last 180 days and LightGBM; every hour the median
+discards the outlier. It is the pipeline's default (`median_bounded`). With the live job's shorter
+history, training from January 2025, it also wins in 2026: 21.50 vs 22.30 in Germany (t = 4.6) and
+8.52 vs 9.23 in Turkey (t = 6.0).
+
+Two limits. 2026 had already been looked at, so this is not fully independent; the live job keeps
+running bounded LEAR beside the median, which is the real test. And the median does not solve
+Germany's recent under-forecast: since 28 October it is still about 62 EUR/MWh too low on average
+(LEAR: 67). The error correction narrows that to 44 and gives the best 2026 results, but it fails
+the rule on Germany 2025 (t = 1.3), so it was left out. Full table:
+[docs/analysis/ensemble.md](docs/analysis/ensemble.md).
 
 ## Live forecasts
 
@@ -123,7 +149,7 @@ above is regenerated every morning (GitHub caches README images for a few hours)
 
 Every morning a GitHub Actions job ([`daily-pipeline.yml`](.github/workflows/daily-pipeline.yml))
 ingests the newest prices and weather forecasts, forecasts the next delivery day for both markets
-with `lear_bounded`, scores the forecasts whose prices have since been published, and publishes a
+with `median_bounded`, scores the forecasts whose prices have since been published, and publishes a
 static dashboard ([`report.py`](src/price_forecast/report.py)) to GitHub Pages. No server and no
 paid cloud: data is carried between runs in the Actions cache, and an empty cache triggers a full
 re-ingest.
@@ -157,7 +183,7 @@ pip install -e ".[dev]"
 
 python -m price_forecast.ingestion.energy_charts --start 2023-01 --end 2025-12
 python -m price_forecast.ingestion.weather --market de_lu --start 2023-01 --end 2025-12
-python -m price_forecast.pipeline --market de_lu --date 2025-12-30 --models seasonal_naive,lear_bounded
+python -m price_forecast.pipeline --market de_lu --date 2025-12-30 --models seasonal_naive,median_bounded
 python -m price_forecast.monitor --market de_lu      # joins forecasts with realised prices
 python -m price_forecast.report --out site           # site/index.html, the dashboard
 uvicorn price_forecast.api:app                       # http://localhost:8000/docs
@@ -176,6 +202,7 @@ pip install -e ".[analysis]"
 python analysis/run_backtests.py      # a few minutes; writes data/backtest_<market>_2025.parquet
 python analysis/error_analysis.py     # writes docs/analysis/results.md and docs/img/*.png
 python analysis/turkey_2026.py        # about ten minutes; needs data to 4 November 2026
+python analysis/ensemble.py           # about ten minutes; needs data to 4 November 2026
 ```
 
 These backtests train on data from January 2023. The live job trains from January 2025, to keep

@@ -64,7 +64,7 @@ def _constructed_table() -> pd.DataFrame:
 
 
 def test_registry():
-    assert MODEL_NAMES == ("naive", "seasonal_naive", "lear", "lightgbm")
+    assert MODEL_NAMES == ("naive", "seasonal_naive", "lear", "lightgbm", "median")
     for name in MODEL_NAMES:
         assert make_model(name).name == name
     assert make_model("lear", calibration_days=56).calibration_days == 56
@@ -164,3 +164,37 @@ def test_asinh_scaler_round_trip_and_negative_prices():
     assert flat.scale_ == pytest.approx(3.0)
     with pytest.raises(ValueError):
         AsinhScaler().fit([np.nan])
+
+
+def test_median_takes_the_middle_forecast_every_hour():
+    from price_forecast.models.median import MedianForecaster
+
+    class Fixed:
+        def __init__(self, values):
+            self.values = values
+
+        def fit(self, train):
+            self.fitted = True
+            return self
+
+        def predict(self, features):
+            return pd.Series(self.values, index=features.index)
+
+    model = MedianForecaster()
+    model.members = [Fixed([1.0, 50.0]), Fixed([2.0, 40.0]), Fixed([900.0, -5.0])]
+    frame = pd.DataFrame({"x": [0, 0]}, index=[7, 8])
+    assert model.fit(frame) is model
+    assert all(m.fitted for m in model.members)
+    result = model.predict(frame)
+    assert result.tolist() == [2.0, 40.0]  # the outlier of the three is ignored
+    assert list(result.index) == [7, 8] and result.name == "median"
+
+
+def test_median_members_are_all_history_short_window_and_lightgbm():
+    model = make_model("median_bounded")
+    assert model.name == "median_bounded"
+    assert [getattr(m, "calibration_days", "n/a") for m in model.inner.members] == [
+        None,
+        180,
+        "n/a",
+    ]

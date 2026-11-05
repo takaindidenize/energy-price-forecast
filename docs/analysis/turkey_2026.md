@@ -39,6 +39,9 @@ neither was added to the model.
 | LEAR, last 180 days | 17.83 | 26.01 | 6.25 | 9.28 |
 | LightGBM, all history | 17.64 | 25.52 | 6.11 | 9.04 |
 
+The 180-day LEAR is unstable: starting the weekly refits a few days later moves its German 2026
+MAE from 26.0 to 24.1, while the other models barely change.
+
 ## Spring 2026 in Turkey
 
 | Month | Mean price | Zero-price hours | Hydro share | LEAR MAE |

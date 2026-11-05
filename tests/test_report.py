@@ -14,9 +14,9 @@ def _fill(warehouse) -> None:
     rows = []
     for i, h in enumerate(hours):
         issued = pd.Timestamp("2026-11-01 10:00") if i < 48 else pd.Timestamp("2026-11-03 10:00")
-        rows.append(("de_lu", "lear_bounded", issued, h, 100.0 + i))
+        rows.append(("de_lu", "median_bounded", issued, h, 100.0 + i))
         # An older forecast for the same hour must be ignored in favour of the latest one.
-        rows.append(("de_lu", "lear_bounded", issued - pd.Timedelta(days=1), h, -999.0))
+        rows.append(("de_lu", "median_bounded", issued - pd.Timedelta(days=1), h, -999.0))
         rows.append(("de_lu", "seasonal_naive", issued, h, 50.0))
     forecasts = pd.DataFrame(
         rows, columns=["market", "model", "issued_at", "delivery_hour", "price_eur_pred"]
@@ -32,7 +32,7 @@ def _fill(warehouse) -> None:
     status = pd.DataFrame(
         [
             ("de_lu", m, "ok", False, 0, 3, 30, 2, mae, mae / 20, "2026-11-03", "2026-11-03")
-            for m, mae in (("lear_bounded", 10.0), ("seasonal_naive", 20.0))
+            for m, mae in (("median_bounded", 10.0), ("seasonal_naive", 20.0))
         ],
         columns=[
             "market",

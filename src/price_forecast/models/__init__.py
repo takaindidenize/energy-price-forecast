@@ -18,6 +18,7 @@ _REGISTRY = {
     "seasonal_naive": "SeasonalNaiveForecaster",
     "lear": "LEARForecaster",
     "lightgbm": "LightGBMForecaster",
+    "median": "MedianForecaster",
 }
 MODEL_NAMES = tuple(_REGISTRY)
 BOUNDED_SUFFIX = "_bounded"

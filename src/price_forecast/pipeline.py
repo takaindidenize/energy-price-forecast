@@ -16,7 +16,7 @@ Ingestion, features and models are imported lazily (see `default_deps`) so this 
 is testable, before or without those areas.
 
     python -m price_forecast.pipeline --market de_lu --date 2026-11-02 \
-        --models seasonal_naive,lear_bounded
+        --models seasonal_naive,median_bounded
 """
 
 from __future__ import annotations
@@ -43,9 +43,9 @@ log = logging.getLogger("price_forecast.pipeline")
 
 DEFAULT_MODELS: tuple[str, ...] = tuple(
     m.strip()
-    # LEAR within the market's price limits was the best model for both markets in the 2025
-    # backtest (README); the seasonal naive is the baseline monitoring compares against.
-    for m in os.environ.get("PF_MODELS", "seasonal_naive,lear_bounded").split(",")
+    # The median of three models is the one the dashboard shows (README). Bounded LEAR keeps
+    # running beside it as a live comparison; the seasonal naive is monitoring's baseline.
+    for m in os.environ.get("PF_MODELS", "seasonal_naive,lear_bounded,median_bounded").split(",")
     if m.strip()
 )
 

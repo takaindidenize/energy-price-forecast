@@ -377,6 +377,9 @@ neither was added to the model.
 
 {window_section(window_results)}
 
+The 180-day LEAR is unstable: starting the weekly refits a few days later moves its German 2026
+MAE from 26.0 to 24.1, while the other models barely change.
+
 ## Spring 2026 in Turkey
 
 {table(spring_rows, ["Month", "Mean price", "Zero-price hours", "Hydro share", "LEAR MAE"])}
