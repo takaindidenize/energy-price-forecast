@@ -186,7 +186,9 @@ ingests the newest prices and weather forecasts, forecasts the next delivery day
 with `median_bounded`, scores the forecasts whose prices have since been published, and publishes a
 static dashboard ([`report.py`](src/price_forecast/report.py)) to GitHub Pages. No server and no
 paid cloud: data is carried between runs in the Actions cache, and an empty cache triggers a full
-re-ingest.
+re-ingest. GitHub disables schedules after 60 quiet days, so
+[`keepalive.yml`](.github/workflows/keepalive.yml) adds an empty commit once the latest commit is 50
+days old.
 
 The first live forecasts, issued on 3 November 2026 for 4 November: Turkey's average forecast was
 59.2 EUR/MWh against a realised 59.3, with an hourly MAE of 4.0 (seasonal naive 5.1). Over the

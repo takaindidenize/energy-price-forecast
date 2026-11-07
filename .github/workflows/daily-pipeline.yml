@@ -30,8 +30,8 @@
 # use the published prices (training and features stop at the issue day), but it does see a fresher
 # weather forecast.
 #
-# GitHub disables schedules after 60 days without any repository activity; re-enable it on the
-# Actions tab if that happens.
+# GitHub disables schedules after 60 days without any repository activity; keepalive.yml adds an
+# empty commit before that. If the schedule is off anyway, re-enable it on the Actions tab.
 name: Daily forecast
 
 on:

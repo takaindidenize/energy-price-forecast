@@ -44,6 +44,8 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       adopted (`analysis/turkey_2026.py`).
 - [x] Combine models without new data: the median of three is the default, bounded LEAR keeps
       running beside it (`analysis/ensemble.py`). Spring 2026 in Turkey improved (14.6 to 10.9).
+- [x] Keep the schedule alive through quiet periods (`keepalive.yml`). Not yet seen working across a
+      real 60-day gap; GitHub's documentation does not define "activity".
 - [ ] Check whether the earlier slots get forecasts out before the auctions close (slots from
       03:17 UTC did not on 6 and 7 November 2026), and whether the gate skips a later slot.
 - [x] What the forecast is worth: a battery scheduled from each forecast (`analysis/battery.py`).
