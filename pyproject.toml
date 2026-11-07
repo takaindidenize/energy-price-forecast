@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=2.2",
     "numpy>=1.26",
     "scikit-learn>=1.5",
+    "scipy>=1.11",
     "lightgbm>=4.5",
     "holidays>=0.60",
     "fastapi>=0.115",

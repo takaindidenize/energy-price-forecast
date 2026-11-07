@@ -140,6 +140,40 @@ Germany's recent under-forecast: since 28 October it is still about 62 EUR/MWh t
 the rule on Germany 2025 (t = 1.3), so it was left out. Full table:
 [docs/analysis/ensemble.md](docs/analysis/ensemble.md).
 
+## What is the forecast worth?
+
+MAE does not say what a forecast is good for, so I scheduled a battery from each forecast and paid
+it at realised prices: 1 MW / 2 MWh, 85% round trip, one cycle a day, empty at the start and end of
+each day ([`battery.py`](src/price_forecast/battery.py)). The ceiling is the same battery with the
+prices known in advance.
+
+| EUR per MW per day (share of the ceiling) | Germany 2025 | Germany 2026 | Turkey 2025 | Turkey 2026 |
+|---|---:|---:|---:|---:|
+| Prices known in advance | 198 | 259 | 62 | 87 |
+| **Median of three** | **184 (93%)** | **247 (95%)** | **55 (89%)** | **79 (91%)** |
+| LEAR (bounded) | 186 (94%) | 248 (96%) | 55 (89%) | 78 (90%) |
+| Hourly profile, last 28 days | 180 (91%) | 244 (94%) | 52 (84%) | 76 (87%) |
+| Issue day's prices | 172 (87%) | 235 (91%) | 48 (77%) | 71 (81%) |
+| Same day last week | 166 (84%) | 230 (89%) | 48 (78%) | 72 (83%) |
+
+**Most of the money needs no model.** The rule, fixed before the results, was that the median must
+beat each simple benchmark in all four market-years (paired t above 2 on daily profit). It beats them
+in 11 of 12 comparisons but fails on Germany 2026 against the 28-day hourly profile (t = 1.98). The
+gain over that profile is about 3–4 EUR per MW per day, roughly 1,100–1,600 EUR a year. A battery
+needs the shape of the day more than the level: in Germany in 2025 the median's error is 43% below
+the profile's (15.5 vs 27.1), and its profit only 2.5% above.
+
+**A lower error is not always more money.** In Germany the median has the lower error, but LEAR
+earns slightly more; the gap is not reliable (t = −1.8 and −1.3). In Turkey in 2026 the median is
+ahead (t = 2.2). In Germany's 8 days of under-forecasting since 28 October, the median earned 104 of
+the 154 EUR per MW per day available, against 126 for LEAR and 112 for the profile. That is too few
+days to conclude anything, but a wrong level did not leave the money untouched.
+
+These are not expected earnings: the battery does not move prices and pays no fees or wear. Germany
+has traded in 15-minute products since 1 October 2025, and hourly averages hide part of that spread.
+Both years also helped choose the model, so this is not an independent test. Full tables:
+[docs/analysis/battery.md](docs/analysis/battery.md).
+
 ## Live forecasts
 
 [![Latest forecasts](https://takaindidenize.github.io/energy-price-forecast/latest.svg)](https://takaindidenize.github.io/energy-price-forecast/)
@@ -205,6 +239,7 @@ python analysis/run_backtests.py      # a few minutes; writes data/backtest_<mar
 python analysis/error_analysis.py     # writes docs/analysis/results.md and docs/img/*.png
 python analysis/turkey_2026.py        # about ten minutes; needs data to 4 November 2026
 python analysis/ensemble.py           # about ten minutes; needs data to 4 November 2026
+python analysis/battery.py            # about fifteen minutes; needs data to 4 November 2026
 ```
 
 These backtests train on data from January 2023. The live job trains from January 2025, to keep

@@ -46,7 +46,10 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       running beside it (`analysis/ensemble.py`). Spring 2026 in Turkey improved (14.6 to 10.9).
 - [ ] Check whether the earlier slots get forecasts out before the auctions close (slots from
       03:17 UTC did not on 6 and 7 November 2026), and whether the gate skips a later slot.
-- [ ] Compare the median and bounded LEAR on live forecasts once a few months have accumulated.
+- [x] What the forecast is worth: a battery scheduled from each forecast (`analysis/battery.py`).
+      The median narrowly fails the rule, on Germany 2026 against the 28-day profile (t = 1.98).
+- [ ] Compare the median and bounded LEAR on live forecasts once a few months have accumulated, in
+      error and in battery profit: LEAR earns slightly more in Germany despite a higher error.
 - [ ] German under-forecast since 28 October 2026 (still about 62 EUR/MWh with the median). The
       7-day error correction narrows it to 44 but failed the rule; re-check on live data. Gas
       prices as a feature are untested.
