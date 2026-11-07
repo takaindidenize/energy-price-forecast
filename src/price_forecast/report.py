@@ -257,14 +257,29 @@ def section_html(view: dict) -> str:
 </section>"""
 
 
+def _auction_close_utc(view: dict) -> pd.Timestamp:
+    """When the auction for the latest forecast day closed, as naive UTC like `computed_at`."""
+    close = config.MARKETS[view["market"]].auction_close_local
+    issue_day = view["next_day"] - timedelta(days=1)
+    local = pd.Timestamp.combine(issue_day, close).tz_localize(view["timezone"])
+    return local.tz_convert("UTC").tz_localize(None)
+
+
 def _forecast_note(view: dict) -> str:
     computed = view["computed_at"]
-    when = f"Computed {computed:%d %b %H:%M} UTC. " if computed is not None else ""
+    when = ""
+    if computed is not None:
+        close = config.MARKETS[view["market"]].auction_close_local
+        side = "before" if computed < _auction_close_utc(view) else "after"
+        when = (
+            f"Computed {computed:%d %b %H:%M} UTC, {side} this day's auction closed "
+            f"({close:%H:%M} local time). "
+        )
     if view["next_realised"].empty:
         return when + "Actual prices for this day were not published when this page was built."
     return (
-        when + "Actual prices were already published when this page was built, because the daily "
-        "job started late, so they are shown too. The forecast did not use them."
+        when + "Actual prices were already published when this page was built, so they are shown "
+        "too. The forecast did not use them."
     )
 
 
@@ -348,8 +363,9 @@ a {{ color:var(--forecast); }}
 </head>
 <body><main>
 <h1>Day-ahead electricity price forecast</h1>
-<p class="sub">Germany-Luxembourg and Turkey, EUR/MWh, local time. Forecasts are made each morning
-before the day-ahead auction closes, from that day's prices and weather forecasts.</p>
+<p class="sub">Germany-Luxembourg and Turkey, EUR/MWh, local time. A forecast is made once a day
+from that day's prices and weather forecasts. GitHub can start the job late, so each market shows
+whether its forecast was ready before the day-ahead auction closed.</p>
 {sections}
 <footer>Updated {updated} UTC · <a href="{repo}">source and method</a> · Data: Energy-Charts
 (Bundesnetzagentur | SMARD.de, CC BY 4.0), EPİAŞ Transparency Platform, Open-Meteo.</footer>

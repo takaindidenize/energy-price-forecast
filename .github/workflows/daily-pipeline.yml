@@ -18,12 +18,17 @@
 #
 # Timing: a forecast has to exist before the day-ahead auctions close (12:00 CET in Germany, 12:30
 # TRT in Turkey), or the next day's real prices are already out when the page is built. GitHub's
-# schedule is best effort: the first scheduled run of this workflow started 8 hours late. So it is
-# scheduled five times from 03:17 UTC, off the busy top of the hour, and the `gate` job ends a run
-# at once when today's forecast already succeeded. A failed run is tried again by the next slot.
+# schedule is best effort: with five slots from 03:17 UTC, the runs of 6 and 7 November 2026 started
+# only at about 11:00 and 10:20 UTC, after Turkey's auction closed. So it is now scheduled six times
+# from 00:17 UTC, off the busy top of the hour, and the `gate` job ends a run at once when today's
+# forecast already succeeded. A failed run is tried again by the next slot. Whether the earlier
+# slots help is not known yet, because GitHub does not show which slot a late run came from.
+# All inputs exist by 00:17 UTC: the issue day's prices came out the afternoon before. An early run
+# may see an older weather forecast than the 11:00 issue time of the backtests.
 # Forecasts are stored with the configured issue time (11:00 local), not the moment the job ran;
-# the dashboard shows the real time. A late run cannot use the published prices (training and
-# features stop at the issue day), but it does see a fresher weather forecast.
+# the dashboard shows the real time and whether it was before the auction closed. A late run cannot
+# use the published prices (training and features stop at the issue day), but it does see a fresher
+# weather forecast.
 #
 # GitHub disables schedules after 60 days without any repository activity; re-enable it on the
 # Actions tab if that happens.
@@ -40,7 +45,7 @@ on:
         required: false
         default: "1"
   schedule:
-    - cron: "17 3-7 * * *"
+    - cron: "17 0-5 * * *"
 
 concurrency:
   group: daily-forecast

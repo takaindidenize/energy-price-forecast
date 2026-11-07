@@ -39,11 +39,13 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       Needs from the owner: repo secrets `EPIAS_USERNAME` / `EPIAS_PASSWORD`, Pages enabled
       (public repo, or a paid plan for a private one), then uncomment the schedule.
 - [x] Live since 3 November 2026: secrets added, first full run green, daily schedule on
-      (five morning slots from 03:17 UTC, first success wins).
+      (six slots from 00:17 UTC, first success wins).
 - [x] Out-of-sample check on 2026 and more Turkish data: load plan and generation mix tested, not
       adopted (`analysis/turkey_2026.py`).
 - [x] Combine models without new data: the median of three is the default, bounded LEAR keeps
       running beside it (`analysis/ensemble.py`). Spring 2026 in Turkey improved (14.6 to 10.9).
+- [ ] Check whether the earlier slots get forecasts out before the auctions close (slots from
+      03:17 UTC did not on 6 and 7 November 2026), and whether the gate skips a later slot.
 - [ ] Compare the median and bounded LEAR on live forecasts once a few months have accumulated.
 - [ ] German under-forecast since 28 October 2026 (still about 62 EUR/MWh with the median). The
       7-day error correction narrows it to 44 but failed the rule; re-check on live data. Gas

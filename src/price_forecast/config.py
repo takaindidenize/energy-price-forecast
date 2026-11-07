@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -63,8 +64,10 @@ class Market:
     source: str
     holiday_country: str
     # Forecasts for delivery day D+1 are issued on day D at this local hour, before the
-    # day-ahead auction closes (12:00 CET in Germany, 12:30 in Turkey).
+    # day-ahead auction closes.
     issue_hour_local: int
+    # Local time the day-ahead auction closes on day D.
+    auction_close_local: time
     weather_points: tuple[WeatherPoint, ...]
     # None: no bounds are applied (the European harmonised limits of -500 and +4,000 EUR/MWh
     # are far outside the prices seen here).
@@ -80,6 +83,7 @@ MARKETS: dict[str, Market] = {
         source="energy_charts",
         holiday_country="DE",
         issue_hour_local=11,
+        auction_close_local=time(12, 0),
         weather_points=(
             WeatherPoint("hamburg", 53.55, 9.99),  # north: wind
             WeatherPoint("berlin", 52.52, 13.40),
@@ -95,6 +99,7 @@ MARKETS: dict[str, Market] = {
         source="epias",
         holiday_country="TR",
         issue_hour_local=11,
+        auction_close_local=time(12, 30),
         weather_points=(
             WeatherPoint("istanbul", 41.01, 28.98),  # largest load centre
             WeatherPoint("ankara", 39.93, 32.86),

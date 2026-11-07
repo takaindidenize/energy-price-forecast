@@ -145,9 +145,9 @@ the rule on Germany 2025 (t = 1.3), so it was left out. Full table:
 [![Latest forecasts](https://takaindidenize.github.io/energy-price-forecast/latest.svg)](https://takaindidenize.github.io/energy-price-forecast/)
 
 **[Open the live dashboard](https://takaindidenize.github.io/energy-price-forecast/)**: the chart
-above is regenerated every morning (GitHub caches README images for a few hours).
+above is regenerated every day (GitHub caches README images for a few hours).
 
-Every morning a GitHub Actions job ([`daily-pipeline.yml`](.github/workflows/daily-pipeline.yml))
+Every day a GitHub Actions job ([`daily-pipeline.yml`](.github/workflows/daily-pipeline.yml))
 ingests the newest prices and weather forecasts, forecasts the next delivery day for both markets
 with `median_bounded`, scores the forecasts whose prices have since been published, and publishes a
 static dashboard ([`report.py`](src/price_forecast/report.py)) to GitHub Pages. No server and no
@@ -164,9 +164,11 @@ to investigate.
 Three lessons from going live:
 
 - **Schedules are not punctual.** GitHub started the first scheduled run 8 hours late, after the
-  next day's prices were out, so the dashboard had no forecast still waiting for its result. The
-  job now has five morning slots and only the first success forecasts. A check on real data
-  confirmed a late run gets the same forecast with or without the published prices.
+  next day's prices were out, so the dashboard had no forecast still waiting for its result. Five
+  morning slots did not solve it: on 6 and 7 November 2026 the job still started around 10:20–11:00
+  UTC, after Turkey's auction closed. The slots now start at 00:17 UTC, which is untested, and the
+  dashboard states each day whether the forecast was ready before the auction closed. A check on
+  real data confirmed a late run gets the same forecast with or without the published prices.
 - **Regulated limits change.** EPDK raised the Turkish cap from 3,400 to 4,500 TRY on 4 April
   2026, so a forecaster built on 2025 data clipped every higher price. The monitor now warns when
   realised prices break the configured limits.

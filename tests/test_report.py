@@ -1,8 +1,10 @@
-from datetime import UTC, datetime
+import html
+from datetime import UTC, date, datetime
 
 import pandas as pd
+import pytest
 
-from price_forecast import report, store
+from price_forecast import config, report, store
 
 
 def _hours(start: str, n: int) -> pd.DatetimeIndex:
@@ -152,7 +154,43 @@ def test_forecast_day_table_and_late_run_note(tmp_path):
             "'2026-11-03 15:30', '2026-11-03 15:36', 'lear_bounded', '', 24, NULL)"
         )
     page = report.build(tmp_path / "after", warehouse).read_text(encoding="utf-8")
-    assert "Computed 03 Nov 15:36 UTC" in page
-    assert "the daily job started late" in page
+    note = "Computed 03 Nov 15:36 UTC, after this day's auction closed (12:00 local time)"
+    assert html.escape(note) in page
+    assert "Actual prices were already published" in page
     table = page.split("<details>")[1].split("</details>")[0]
     assert "<td>00:00</td><td>148.0</td><td>200.0</td></tr>" in table
+
+
+@pytest.mark.parametrize(
+    ("market", "next_day", "computed", "side"),
+    [
+        # Germany closes at 12:00 local: 11:00 UTC in winter, 10:00 UTC in summer.
+        ("de_lu", date(2026, 11, 8), "2026-11-07 10:59", "before"),
+        ("de_lu", date(2026, 11, 8), "2026-11-07 11:00", "after"),
+        ("de_lu", date(2026, 7, 2), "2026-07-01 09:59", "before"),
+        ("de_lu", date(2026, 7, 2), "2026-07-01 10:01", "after"),
+        # Turkey closes at 12:30 local, 09:30 UTC all year.
+        ("tr", date(2026, 11, 8), "2026-11-07 09:29", "before"),
+        ("tr", date(2026, 11, 8), "2026-11-07 09:30", "after"),
+    ],
+)
+def test_note_says_whether_the_forecast_beat_the_auction(market, next_day, computed, side):
+    view = {
+        "market": market,
+        "timezone": config.MARKETS[market].timezone,
+        "next_day": next_day,
+        "computed_at": pd.Timestamp(computed),
+        "next_realised": pd.DataFrame(),
+    }
+    assert f"UTC, {side} this day's auction closed" in report._forecast_note(view)
+
+
+def test_note_makes_no_auction_claim_without_a_run_time():
+    view = {
+        "market": "tr",
+        "timezone": config.MARKETS["tr"].timezone,
+        "next_day": date(2026, 11, 8),
+        "computed_at": None,
+        "next_realised": pd.DataFrame(),
+    }
+    assert "auction" not in report._forecast_note(view)
