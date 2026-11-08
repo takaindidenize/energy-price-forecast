@@ -46,8 +46,11 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
       running beside it (`analysis/ensemble.py`). Spring 2026 in Turkey improved (14.6 to 10.9).
 - [x] Keep the schedule alive through quiet periods (`keepalive.yml`). Not yet seen working across a
       real 60-day gap; GitHub's documentation does not define "activity".
+- [x] Keep the live forecast history outside the Actions cache: merged into CSV on the `data`
+      branch after every run, restored when the cache is empty (`history.py`).
 - [ ] Check whether the earlier slots get forecasts out before the auctions close (slots from
-      03:17 UTC did not on 6 and 7 November 2026), and whether the gate skips a later slot.
+      03:17 UTC did not on 6 and 7 November 2026; on 8 November the run started at 06:11 UTC), and
+      whether the gate skips a later slot.
 - [x] What the forecast is worth: a battery scheduled from each forecast (`analysis/battery.py`).
       The median narrowly fails the rule, on Germany 2026 against the 28-day profile (t = 1.98).
 - [ ] Compare the median and bounded LEAR on live forecasts once a few months have accumulated, in

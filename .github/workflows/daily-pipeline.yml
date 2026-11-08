@@ -2,9 +2,10 @@
 # and publish the dashboard (src/price_forecast/report.py) to GitHub Pages.
 #
 # Storage: data/ (raw Parquet + warehouse.duckdb) is carried from run to run in the Actions cache.
-# When the cache is empty (first run, or evicted after 7 days without a run) the job ingests the
-# history again and the forecast history on the dashboard starts over; run it once by hand with
-# `backfill_days` to refill it.
+# The live forecasts and run times cannot be made again, so after each run they are also merged
+# into CSV files on the repository's `data` branch (src/price_forecast/history.py). When the cache
+# is empty (first run, or evicted after 7 days without a run) the job ingests the raw data again
+# and restores the forecast history from that branch.
 #
 # History: the live models train on data from PF_START_MONTH (January 2025), not 2023 as in the
 # README's backtest. On GitHub's shared runners each Open-Meteo request can take about a minute,
@@ -73,6 +74,8 @@ jobs:
     if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write  # pushes the forecast history to the data branch
     env:
       PF_DATA_DIR: ${{ github.workspace }}/data
       PF_START_MONTH: "2025-01"
@@ -93,6 +96,7 @@ jobs:
           restore-keys: data-
 
       - name: Ingest the full history if there is none
+        id: ingest
         run: |
           echo "PF_END_MONTH=$(date -u +%Y-%m)" >> "$GITHUB_ENV"
           export PF_END_MONTH="$(date -u +%Y-%m)"
@@ -100,10 +104,24 @@ jobs:
             echo "Data restored from the cache; the pipeline fetches the recent months itself."
             exit 0
           fi
+          echo "fresh=true" >> "$GITHUB_OUTPUT"
           python -m price_forecast.ingestion.energy_charts
           python -m price_forecast.ingestion.weather --market de_lu
           python -m price_forecast.ingestion.weather --market tr
           python -m price_forecast.ingestion.epias || echo "::warning::EPİAŞ ingestion failed (secrets missing?)"
+
+      - name: Restore the forecast history after an empty cache
+        if: steps.ingest.outputs.fresh == 'true'
+        run: |
+          if ! git fetch --depth=1 origin data; then
+            echo "::warning::No data branch yet; the forecast history starts empty."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/history"
+          for table in forecasts pipeline_runs; do
+            git show "FETCH_HEAD:history/$table.csv" > "$RUNNER_TEMP/history/$table.csv"
+          done
+          python -m price_forecast.history restore --from "$RUNNER_TEMP/history"
 
       - name: Forecast tomorrow
         id: pipeline
@@ -145,6 +163,33 @@ jobs:
         with:
           path: .forecast-done
           key: forecast-done-${{ needs.gate.outputs.day }}
+
+      # Merges, never shrinks: a run that starts empty cannot erase the history. A failure here
+      # fails the run, and the next day's export still carries every row.
+      - name: Keep the forecast history on the data branch
+        if: ${{ !cancelled() }}
+        env:
+          DAY: ${{ needs.gate.outputs.day }}
+        run: |
+          dir="$RUNNER_TEMP/data-branch"
+          if git fetch --depth=1 origin data; then
+            git worktree add --detach "$dir" FETCH_HEAD
+          else
+            git worktree add --detach "$dir"
+            git -C "$dir" checkout --orphan data
+            git -C "$dir" rm -rqf .
+          fi
+          python -m price_forecast.history export --out "$dir/history"
+          cd "$dir"
+          git add history
+          if git diff --cached --quiet; then
+            echo "The forecast history has not changed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Forecast history, run of $DAY"
+          git push origin HEAD:refs/heads/data
 
       - name: Fail the run if a market failed
         if: steps.pipeline.outcome == 'failure'

@@ -186,7 +186,10 @@ ingests the newest prices and weather forecasts, forecasts the next delivery day
 with `median_bounded`, scores the forecasts whose prices have since been published, and publishes a
 static dashboard ([`report.py`](src/price_forecast/report.py)) to GitHub Pages. No server and no
 paid cloud: data is carried between runs in the Actions cache, and an empty cache triggers a full
-re-ingest. GitHub disables schedules after 60 quiet days, so
+re-ingest. The live forecasts cannot be made again, so each run also merges them into CSV files on
+the [`data` branch](https://github.com/takaindidenize/energy-price-forecast/tree/data/history)
+([`history.py`](src/price_forecast/history.py)), and a run with an empty cache restores them from
+there. GitHub disables schedules after 60 quiet days, so
 [`keepalive.yml`](.github/workflows/keepalive.yml) commits a small counter once the latest commit is
 50 days old.
 
