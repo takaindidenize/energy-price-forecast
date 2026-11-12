@@ -56,8 +56,9 @@ Plan: free hosting with GitHub Actions and GitHub Pages instead of a paid cloud 
 - [ ] Compare the median and bounded LEAR on live forecasts once a few months have accumulated, in
       error and in battery profit: LEAR earns slightly more in Germany despite a higher error.
 - [ ] German under-forecast since 28 October 2026 (still about 62 EUR/MWh with the median). The
-      7-day error correction narrows it to 44 but failed the rule; re-check on live data. Gas
-      prices as a feature are untested.
+      7-day error correction narrows it to 44 but failed the rule; re-check on live data.
+      Anchoring to the issue day's level (`analysis/level_anchor.py`, 13 November) better in 2026,
+      worse in 2025: fails. No publishable gas or carbon source found.
 
 ## On publication (making the repository public)
 - [x] Settings → Pages → Source: "GitHub Actions"; live at

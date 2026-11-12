@@ -140,6 +140,28 @@ Germany's recent under-forecast: since 28 October it is still about 62 EUR/MWh t
 the rule on Germany 2025 (t = 1.3), so it was left out. Full table:
 [docs/analysis/ensemble.md](docs/analysis/ensemble.md).
 
+### Anchoring to the issue day's level
+
+Why Germany is too low: the error does not depend on wind, about a third of it is a whole-day level
+gap, and at equal wind prices are two to three times last autumn's. Something outside the weather
+moved the level; gas and carbon prices are the usual suspects, but no free daily source was found
+whose licence allows publishing forecasts made from them. So the next test used no new data: each
+model learns the delivery day as deviations from the issue day's mean price and adds that mean
+back, so a new level carries over at once. Same rule, now against the median:
+
+| MAE, EUR/MWh | Germany 2025 | Germany 2026 | Turkey 2025 | Turkey 2026 | Rule |
+|---|---:|---:|---:|---:|---|
+| Median of three (default) | 15.41 | 22.28 | 5.69 | 8.38 | |
+| LEAR, anchored | 16.14 | 21.84 | 6.22 | 8.37 | fails |
+| Median of three, anchored | 15.74 | 21.04 | 5.87 | 7.91 | fails |
+| Yesterday's price | 25.97 | 33.04 | 9.00 | 10.54 | (context) |
+
+The anchored median is better in both markets in 2026 (t = 3.5 and 4.4) and cuts Germany's error
+since 28 October from 48 to 27 EUR/MWh too low, but it is worse in 2025 in both (t = -1.8 and
+-3.5), so it is not adopted. The same trade as the error correction above: following yesterday's
+level pays when the level jumps and costs in calm years, when yesterday's quirks carry over too.
+[docs/analysis/level_anchor.md](docs/analysis/level_anchor.md).
+
 ## What is the forecast worth?
 
 MAE does not say what a forecast is good for, so I scheduled a battery from each forecast and paid
@@ -245,6 +267,7 @@ python analysis/error_analysis.py     # writes docs/analysis/results.md and docs
 python analysis/turkey_2026.py        # about ten minutes; needs data to 4 November 2026
 python analysis/ensemble.py           # about ten minutes; needs data to 4 November 2026
 python analysis/battery.py            # about fifteen minutes; needs data to 4 November 2026
+python analysis/level_anchor.py       # about twenty minutes; needs data to 13 November 2026
 ```
 
 These backtests train on data from January 2023. The live job trains from January 2025, to keep
