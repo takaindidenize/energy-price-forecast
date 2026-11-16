@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from price_forecast import config, store
+from price_forecast import bounds, config, store
 
 log = logging.getLogger("price_forecast.report")
 
@@ -100,6 +100,44 @@ def market_view(
     }
 
 
+def daily_caps(market: str, days: list, rates: pd.Series | None) -> pd.Series:
+    """The price cap in EUR/MWh by local delivery day, empty when the market has none.
+
+    The cap is set in local currency, so in EUR it moves a little with the exchange rate: each day
+    uses its own rate (from the published prices), the forecast day the latest known one.
+    """
+    limits = config.MARKETS[market].limits
+    if limits is None or not limits.caps or rates is None or rates.empty:
+        return pd.Series(dtype="float64")
+    known = rates.copy()
+    known.index = pd.to_datetime(known.index)
+    rate = known.asof(pd.DatetimeIndex(pd.to_datetime(days)))
+    caps = (
+        pd.Series([bounds.cap_on(market, d) for d in days], index=days, dtype="float64")
+        * rate.to_numpy()
+    )
+    return caps.dropna()
+
+
+def _rates(market: str) -> pd.Series | None:
+    """EUR per local currency unit by day, or None when the raw prices cannot be read."""
+    try:
+        return bounds.eur_per_local(market)
+    except Exception as exc:  # the page must still build without the raw data
+        log.warning("%s: no exchange rates for the price cap line (%s)", market, exc)
+        return None
+
+
+def _visible_caps(view: dict, days: list, values: pd.Series) -> pd.Series:
+    """The caps to draw: only when prices come near them, so a far-off cap does not flatten the
+    chart."""
+    caps = view.get("caps", pd.Series(dtype="float64"))
+    caps = caps[caps.index.isin(days)]
+    if caps.empty or values.empty or values.max() < 0.8 * caps.min():
+        return pd.Series(dtype="float64")
+    return caps
+
+
 def _nice_ticks(lo: float, hi: float, n: int = 5) -> list[float]:
     span = max(hi - lo, 1e-9)
     raw = span / n
@@ -126,7 +164,10 @@ def chart_svg(view: dict, interactive: bool = False, one_day: bool = False) -> s
     times = pd.concat([f["local"], r["local"]])
     t0, t1 = times.min(), times.max() + pd.Timedelta(hours=1)
     values = pd.concat([f["price_eur_pred"], r["price_eur"]]).dropna()
-    ticks = _nice_ticks(min(0.0, values.min()), values.max())
+    days = sorted(set(f["local"].dt.date) | set(r["local"].dt.date))
+    caps = _visible_caps(view, days, values)
+    top = max(values.max(), caps.max()) if not caps.empty else values.max()
+    ticks = _nice_ticks(min(0.0, values.min()), top)
     y0, y1 = ticks[0], ticks[-1]
 
     def x(t: pd.Timestamp) -> float:
@@ -175,6 +216,13 @@ def chart_svg(view: dict, interactive: bool = False, one_day: bool = False) -> s
                 f"{tick.strftime(label)}</text>"
             )
         tick += step
+    if not caps.empty:
+        segments = []
+        for day, cap in caps.items():
+            start = max(pd.Timestamp(day).tz_localize(view["timezone"]), t0)
+            end = min(pd.Timestamp(day + timedelta(days=1)).tz_localize(view["timezone"]), t1)
+            segments.append(f"M{x(start):.1f},{y(cap):.1f} L{x(end):.1f},{y(cap):.1f}")
+        parts.append(f'<path class="cap" d="{" ".join(segments)}"/>')
     parts.append(f'<path class="actual" d="{path(r["local"], r["price_eur"])}"/>')
     parts.append(f'<path class="forecast" d="{path(f["local"], f["price_eur_pred"])}"/>')
     if interactive:
@@ -241,6 +289,19 @@ def section_html(view: dict) -> str:
         for k, v in stats
     )
     status_html = html.escape(status_text)
+    cap_key = ""
+    shown = _visible_caps(
+        view,
+        sorted(set(view["forecasts"]["local"].dt.date) | set(view["realised"]["local"].dt.date)),
+        pd.concat([view["forecasts"]["price_eur_pred"], view["realised"]["price_eur"]]).dropna(),
+    )
+    if not shown.empty:
+        m = config.MARKETS[view["market"]]
+        local_cap = bounds.cap_on(view["market"], view["next_day"])
+        cap_key = (
+            ' <span class="key" title="In EUR at each day\'s exchange rate">'
+            f'<span class="swatch cap"></span>Price cap, {local_cap:,.0f} {m.currency}/MWh</span>'
+        )
     return f"""
 <section>
   <h2>{html.escape(view["name"])}</h2>
@@ -253,7 +314,7 @@ def section_html(view: dict) -> str:
   <div class="chart">{chart_svg(view, interactive=True)}<div class="tip" hidden></div></div>
   <p class="legend"><span class="swatch actual"></span>Realised price
     <span class="swatch forecast"></span>Forecast (median of three models, within price limits)
-    <span class="swatch next"></span>Latest forecast day · model status: {status_html}</p>
+    <span class="swatch next"></span>Latest forecast day · model status: {status_html}{cap_key}</p>
 </section>"""
 
 
@@ -340,6 +401,7 @@ svg {{ width:100%; height:auto; display:block; }}
 .actual {{ fill:none; stroke:var(--ink); stroke-width:2; }}
 .forecast {{ fill:none; stroke:var(--forecast); stroke-width:2; }}
 .next {{ fill:var(--next); }}
+.cap {{ fill:none; stroke:var(--ink2); stroke-width:1.5; stroke-dasharray:6 4; }}
 .chart {{ position:relative; }}
 .chart svg {{ touch-action:pan-y; cursor:crosshair; }}
 .cross {{ stroke:var(--ink2); stroke-width:1; stroke-dasharray:3 3; visibility:hidden; }}
@@ -353,10 +415,13 @@ svg {{ width:100%; height:auto; display:block; }}
 .tip .k {{ display:inline-block; width:10px; height:3px; vertical-align:middle;
   margin-right:6px; }}
 .legend {{ color:var(--ink2); font-size:13px; margin:8px 0 0; }}
+.key {{ white-space:nowrap; }}
 .swatch {{ display:inline-block; width:14px; height:3px; vertical-align:middle;
   margin:0 4px 0 10px; }}
 .swatch.actual {{ background:var(--ink); }} .swatch.forecast {{ background:var(--forecast); }}
 .swatch.next {{ background:var(--next); height:10px; border:1px solid var(--grid); }}
+.swatch.cap {{ background:repeating-linear-gradient(90deg, var(--ink2) 0 5px,
+  transparent 5px 8px); }}
 footer {{ color:var(--ink2); font-size:13px; }}
 a {{ color:var(--forecast); }}
 </style>
@@ -433,6 +498,12 @@ def build(
         for m in config.MARKETS
         if (v := market_view(m, forecasts, realised, status, history_days, runs)) is not None
     ]
+    for v in views:
+        if config.MARKETS[v["market"]].limits is not None:
+            days = sorted(
+                set(v["forecasts"]["local"].dt.date) | set(v["realised"]["local"].dt.date)
+            )
+            v["caps"] = daily_caps(v["market"], days, _rates(v["market"]))
     sections = "".join(section_html(v) for v in views) or "<p>No forecasts yet.</p>"
     updated = (now or datetime.now(UTC)).strftime("%Y-%m-%d %H:%M")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -452,10 +523,12 @@ SVG_STYLE = """<style>
 .actual { fill:none; stroke:#0b0b0b; stroke-width:2; }
 .forecast { fill:none; stroke:#2a78d6; stroke-width:2; } .forecast-key { fill:#2a78d6; }
 .actual-key { fill:#0b0b0b; } .next { fill:#2a78d614; } .hit { fill:transparent; }
+.cap { fill:none; stroke:#52514e; stroke-width:1.5; stroke-dasharray:6 4; }
 @media (prefers-color-scheme: dark) {
   .bg { fill:#1a1a19; stroke:#383835; } .h1, .h2 { fill:#f0efec; } .sub, .tick { fill:#c3c2b7; }
   .grid { stroke:#383835; } .actual { stroke:#f0efec; } .actual-key { fill:#f0efec; }
   .forecast { stroke:#3987e5; } .forecast-key { fill:#3987e5; } .next { fill:#3987e51f; }
+  .cap { stroke:#c3c2b7; }
 }
 </style>"""
 
@@ -498,6 +571,11 @@ def latest_svg(views: list[dict], updated: str) -> str:
         f'<text class="sub" x="{_W - 16}" y="{y + 9}" text-anchor="end">'
         f"Updated {updated} UTC</text>"
     )
+    if any('class="cap"' in p for p in parts):
+        parts.append(
+            f'<path class="cap" d="M330,{y + 5.5} L344,{y + 5.5}"/>'
+            f'<text class="sub" x="350" y="{y + 9}">Price cap</text>'
+        )
     if not views:
         parts.append(f'<text class="sub" x="16" y="{header + 20}">No forecasts yet.</text>')
     parts.append("</svg>")

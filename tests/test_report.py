@@ -194,3 +194,47 @@ def test_note_makes_no_auction_claim_without_a_run_time():
         "next_realised": pd.DataFrame(),
     }
     assert "auction" not in report._forecast_note(view)
+
+
+def _turkey_view(prices: list[float]) -> dict:
+    """A Turkish view of 2 days of history and a forecast day, with the 4,500 TRY cap."""
+    tz = config.MARKETS["tr"].timezone
+    hours = pd.date_range("2026-11-09", periods=72, freq="h", tz=tz)
+    f = pd.DataFrame({"local": hours, "price_eur_pred": (prices * 72)[:72]})
+    r = pd.DataFrame({"local": hours[:48], "price_eur": (prices * 48)[:48]})
+    days = [date(2026, 11, 9), date(2026, 11, 10), date(2026, 11, 11)]
+    rates = pd.Series([1 / 56.0, 1 / 55.0], index=[date(2026, 11, 9), date(2026, 11, 10)])
+    return {
+        "market": "tr",
+        "name": "Turkey",
+        "timezone": tz,
+        "next_day": days[-1],
+        "tomorrow": f.iloc[48:],
+        "next_realised": r.iloc[:0],
+        "forecasts": f,
+        "realised": r,
+        "caps": report.daily_caps("tr", days, rates),
+    }
+
+
+def test_daily_caps_use_each_days_rate():
+    rates = pd.Series([0.02, 0.025], index=[date(2026, 11, 9), date(2026, 11, 10)])
+    caps = report.daily_caps(
+        "tr", [date(2026, 11, 9), date(2026, 11, 10), date(2026, 11, 11)], rates
+    )
+    assert caps.tolist() == pytest.approx([90.0, 112.5, 112.5])  # the forecast day: latest rate
+    assert report.daily_caps("de_lu", [date(2026, 11, 9)], None).empty  # no cap in Germany
+
+
+def test_chart_draws_the_cap_when_prices_reach_it():
+    view = _turkey_view([40.0, 81.0])
+    svg = report.chart_svg(view)
+    assert svg.count('class="cap"') == 1
+    assert svg.count("M") >= 3  # one segment per day
+    one_day = report.chart_svg(view, one_day=True)
+    assert 'class="cap"' in one_day
+
+
+def test_chart_leaves_out_a_cap_far_above_the_prices():
+    view = _turkey_view([10.0, 20.0])
+    assert 'class="cap"' not in report.chart_svg(view)
